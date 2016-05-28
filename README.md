@@ -1,4 +1,6 @@
-# Description
+# postgresql-simple-bind
+
+## Description
   A FFI-like bindings for PostgreSQL strored functions.
   
   `postgresql-simple-bind` is an extension for `postgresql-simple`
@@ -7,7 +9,7 @@
   communicates with a database via API hiding the internal structure
   of the latter.
 
-# Example
+## Example
   Suppose we have the following functions in our database:
 
   ```
@@ -34,7 +36,7 @@
   get_sum conn = sum <$> (get_all_nums conn)
   ```
 
-# Behind the scenes
+## Behind the scenes
   It worth to mention that type translation from PostrgeSQL language to haskell
   is two-step. Firstly, a PostgreSQL type mapped to `PostgresType` instance and
   then this type family provides us the final type.
@@ -65,7 +67,7 @@
   our own instances.
 
 
-# On types
+## On types
   As we mentioned in the previous section there are certain restrictions on the
   types that can be used in `PostgresType` instances.
 
@@ -86,8 +88,8 @@
   supposed to return non-`null`-values.
 
 
-# Customization
-  There are not so much ways to change behaviour of `bindFunction` (yet).
+## Customization
+  There are not so many ways to change behaviour of `bindFunction` (yet).
   In the most cases the only required tweak is renaming stored functions.
   This can be done by specifying `nameModifier` and `schemaModifier` options.
   For example if database and application code adhere snake case and camel case
@@ -103,7 +105,7 @@
     }
   ```
 
-# Automated generation
+## Automated generation
   It can be tedious to manually maintain consistent function declarations
   across the codebase. More convenient way is to automatically generate module
   during the compilation time. In case of cabal it can be done by using 
