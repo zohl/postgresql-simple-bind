@@ -1,16 +1,20 @@
 name:                postgresql-simple-bind
 version:             0.1.0.0
 synopsis:            A FFI-like bindings for PostgreSQL stored functions
--- description:         
+description:         For tutorial see here: https:\/\/github.com\/zohl\/postgresql-simple-bind\/blob\/master\/README.md 
 license:             GPL-3
 license-file:        LICENSE
 author:              Al Zohali
-maintainer:          zohl@fmap.me
+maintainer:          Al Zohali <zohl@fmap.me>
 -- copyright:           
 category:            Database
 build-type:          Simple
 -- extra-source-files:  
 cabal-version:       >=1.10
+
+source-repository head
+  type:     git
+  location: https://github.com/zohl/postgresql-simple-bind.git
 
 library
   build-depends: base >=4.8 && <4.9
@@ -42,7 +46,7 @@ test-suite tests
   hs-source-dirs: tests
   main-is:        Main.hs
 
-  ghc-options: -Wall -ddump-splices
+  ghc-options: -Wall
 
   build-depends: base
                , bytestring
@@ -61,7 +65,7 @@ test-suite examples
   hs-source-dirs: examples
   main-is:        Main.hs
 
-  ghc-options: -Wall -ddump-splices
+  ghc-options: -Wall
 
   build-depends: attoparsec
                , base

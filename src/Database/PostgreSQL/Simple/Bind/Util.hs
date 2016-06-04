@@ -45,7 +45,7 @@ import Text.Heredoc
 import qualified Data.ByteString.Char8 as BS
 
 
--- | Options that specify how to construct your function binding.
+-- | Options that specify how to construct the function binding.
 data Options = Options {
       nameModifier :: String -> String
       -- ^ Function applied to the function's name.

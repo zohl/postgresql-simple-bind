@@ -46,7 +46,7 @@ data PGArgument = PGArgument String String Bool deriving (Show, Eq)
 -- | Representation of a PostrgeSQL function signature (schema, name, arguments, result).
 data PGFunction = PGFunction String String [PGArgument] PGResult deriving (Show, Eq)
 
--- | Representation of a rasultant's column (name, type). 
+-- | Representation of a resultant's column (name, type). 
 data PGColumn = PGColumn String String deriving (Show, Eq)
 
 -- | Representation of a function's return value.
