@@ -11,8 +11,9 @@ mkDerivation {
     template-haskell text time
   ];
   testHaskellDepends = [
-    base bytestring case-conversion HUnit postgresql-simple text
+    attoparsec base bytestring case-conversion HUnit postgresql-simple
+    text
   ];
-  description = "A FFI-like bindings to stored functions";
+  description = "A FFI-like bindings for PostgreSQL stored functions";
   license = stdenv.lib.licenses.gpl3;
 }

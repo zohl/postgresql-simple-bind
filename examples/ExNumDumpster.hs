@@ -18,7 +18,7 @@ module ExNumDumpster (
 import Test.HUnit
 import Database.PostgreSQL.Simple
 
-import Database.PostgreSQL.Simple.Bind (bindFunction)      
+import Database.PostgreSQL.Simple.Bind (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Types()
 
 import Common (bindOptions, TestEnv, mkTest, include)
@@ -46,14 +46,14 @@ iterFib conn = do
   sqlClear conn
   addManyNums conn [x, x']
   return x'
-  
+
 
 numDumpster :: TestEnv -> Test
 numDumpster = mkTest (flip include "./examples/sql/numdumpster.sql")
   (\conn -> do
       sqlAddNum conn 1
       sqlGetLastNum conn >>= \x -> assertEqual "check get_last_num" 1 x
-       
+
       sqlClear conn
       addManyNums conn [1, 2, 3, 4]
       sqlGetAllNums conn >>= \xs -> assertEqual "check get_all_nums" [1, 2, 3, 4] xs

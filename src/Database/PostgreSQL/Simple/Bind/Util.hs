@@ -11,7 +11,7 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE FlexibleInstances          #-} 
+{-# LANGUAGE FlexibleInstances          #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Util
@@ -19,7 +19,7 @@
   License:     GPL3
   Maintainer:  Al Zohali <zohl@fmap.me>
   Stability:   experimental
- 
+
   Misc auxiliary functions.
 -}
 
@@ -29,18 +29,17 @@ module Database.PostgreSQL.Simple.Bind.Util (
   , unwrapColumn
   , Options(..)
   , defaultOptions
-  , getFunctionDeclaration    
+  , getFunctionDeclaration
   , generateBindingsModule
   , mkFunctionName
   ) where
 
 
-import Data.Text                    (Text, append, pack, breakOnEnd, dropEnd)
 import Data.List
-import Data.Maybe                   (isNothing)
+import Data.Text (Text, append, breakOnEnd, dropEnd)
 import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.Types
 import Database.PostgreSQL.Simple.Bind.Representation
+import Database.PostgreSQL.Simple.Types
 import Text.Heredoc
 import qualified Data.ByteString.Char8 as BS
 
@@ -55,7 +54,7 @@ data Options = Options {
   }
 {-|
   Default 'Options':
-  
+
    @
    'Options' {
      'nameModifier' = id
@@ -63,6 +62,8 @@ data Options = Options {
    }
    @
 -}
+
+defaultOptions :: Options
 defaultOptions = Options {
       nameModifier = id
     , schemaModifier = (\_ -> "")
@@ -88,7 +89,7 @@ unwrapRow = head . unwrapColumn
 -- | Fetch function declaration that can be passed to 'bindFunction'.
 getFunctionDeclaration :: Connection -> Text -> IO Text
 getFunctionDeclaration conn name = unwrapRow <$> query conn sql (Only name) where
-  sql = Query $ BS.pack $ [str| 
+  sql = Query $ BS.pack $ [str|
       | select 'function '
       |     || p.proname
       |     || '('||pg_catalog.pg_get_function_arguments(p.oid)||')'
@@ -107,14 +108,14 @@ getFunctionDeclaration conn name = unwrapRow <$> query conn sql (Only name) wher
 generateBindingsModule :: Connection -> Text -> Text -> [Text] -> IO Text
 generateBindingsModule conn opt name ns = do
   ds <- mapM (getFunctionDeclaration conn) ns
-  let fs = parsePGFunction <$> ds
+  -- let fs = parsePGFunction <$> ds
 
   let (optPath', optName) = breakOnEnd "." opt
   let optPath = dropEnd 1 optPath'
 
   let mkList xs = foldl1' append $ ("    " :) $ intersperse "\n  , " xs
 
-  return $ foldl1' append $ [ 
+  return $ foldl1' append $ [
       [str| -- This module was automatically generated. Do not edit it.
       |
       |{-# LANGUAGE DataKinds         #-}

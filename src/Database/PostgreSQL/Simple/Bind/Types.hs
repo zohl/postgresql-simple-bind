@@ -11,7 +11,7 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE FlexibleInstances          #-} 
+{-# LANGUAGE FlexibleInstances          #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Types
@@ -36,7 +36,7 @@ import Database.PostgreSQL.Simple.Bind.Implementation (PostgresType)
 type instance PostgresType "character varying" = Text
 type instance PostgresType "varchar"           = Text
 
-type instance PostgresType "bigint"            = Int 
+type instance PostgresType "bigint"            = Int
 
 type instance PostgresType "void"              = ()
 

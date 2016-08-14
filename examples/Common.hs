@@ -15,19 +15,19 @@ import qualified Data.ByteString.Char8 as BS
 
 
 data TestEnv = TestEnv {
-    connectInfo :: ConnectInfo
+    envConnectInfo :: ConnectInfo
   }
 
 bindOptions :: Options
 bindOptions = defaultOptions {
     nameModifier = convertCase Snake Camel . ("sql_" ++)
-  } 
+  }
 
 withConn :: ConnectInfo -> (Connection -> IO a) -> IO a
 withConn connectInfo = bracket (connect connectInfo) close
-  
+
 mkTest :: (Connection -> IO ()) -> (Connection -> IO()) -> TestEnv -> Test
-mkTest setup run env = TestCase $ withConn (connectInfo env)
+mkTest setup run env = TestCase $ withConn (envConnectInfo env)
   (\conn -> mapM_ ($ conn) [begin, setup, run, rollback])
 
 include :: Connection -> String -> IO ()

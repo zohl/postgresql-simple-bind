@@ -52,7 +52,7 @@ instance FromField User where
 
     parseValue bs = ($ (parseOnly parser bs)) $ either
       (returnError ConversionFailed f) pure
-    
+
     parser = do
       _         <- char '('
       userId'   <- decimal
@@ -76,8 +76,8 @@ users = mkTest (flip include "./examples/sql/users.sql")
 
       sqlGetUsers conn (Just "Mr. Ba_") >>=
         \xs -> assertEqual "check get_users 2" [mrBarId, mrBazId] (map userId xs)
-  
-      sqlDelUser conn mrBarId 
+
+      sqlDelUser conn mrBarId
 
       sqlGetUsers conn Nothing >>=
         \xs -> assertEqual "check get_users 3" [mrFooId, mrBazId] (map userId xs))

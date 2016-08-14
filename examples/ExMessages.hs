@@ -18,7 +18,7 @@ module ExMessages (
   ) where
 
 import Test.HUnit
-import Database.PostgreSQL.Simple.Bind (bindFunction)      
+import Database.PostgreSQL.Simple.Bind (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Types()
 import Database.PostgreSQL.Simple (Connection)
 import Prelude hiding (getContents)

@@ -1,0 +1,50 @@
+language: c
+
+sudo: false
+
+services:
+  - postgresql
+addons:
+  postgresql: "9.4"
+
+matrix:
+  include:
+    - env: CABALVER=1.18 GHCVER=7.8.4
+      addons: {apt: {packages: [cabal-install-1.18,ghc-7.8.4], sources: [hvr-ghc]}}
+    - env: CABALVER=1.22 GHCVER=7.10.3
+      addons: {apt: {packages: [cabal-install-1.22,ghc-7.10.3], sources: [hvr-ghc]}}
+    - env: CABALVER=1.24 GHCVER=8.0.1
+      addons: {apt: {packages: [cabal-install-1.24,ghc-8.0.1], sources: [hvr-ghc]}}
+    - env: CABALVER=head GHCVER=head
+      addons: {apt: {packages: [cabal-install-head,ghc-head], sources: [hvr-ghc]}}
+
+  allow_failures:
+    - env: CABALVER=head GHCVER=head
+
+before_install:
+  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
+
+install:
+  - cabal --version
+  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
+  - travis_retry cabal update
+  - cabal install --only-dependencies --enable-tests
+
+before_script:
+  - psql -U postgres -c 'create database test_db;'
+  - psql -U postgres -c "create role test_role with password 'TEST' login;"
+
+script:
+  - case "$CABALVER" in
+     "1.18") cabal configure --enable-tests --enable-library-coverage -v2 -f dev ;;
+     *)      cabal configure --enable-tests --enable-coverage -v2 -f dev ;;
+    esac
+  - cabal build
+  - cabal test --show-details=always
+  - cabal sdist
+  - cabal haddock | grep "100%" | wc -l | grep "5"
+
+notifications:
+  email:
+    recipients:
+      - zohl@fmap.me

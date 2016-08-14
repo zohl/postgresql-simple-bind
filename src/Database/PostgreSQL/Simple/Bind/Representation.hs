@@ -11,7 +11,7 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE FlexibleInstances          #-} 
+{-# LANGUAGE FlexibleInstances          #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Representation
@@ -19,7 +19,7 @@
   License:     GPL3
   Maintainer:  Al Zohali <zohl@fmap.me>
   Stability:   experimental
- 
+
   An algebraic data type that (partially) represents function declaration based on
   <http://www.postgresql.org/docs/9.5/static/sql-createfunction.html PostgreSQL documentation>.
 -}
@@ -33,11 +33,10 @@ module Database.PostgreSQL.Simple.Bind.Representation (
   ) where
 
 
-import Prelude hiding (takeWhile, length)
 import Control.Applicative
 import Data.Attoparsec.Text
-import Data.Text                    (Text, toLower, pack, unpack, append, length)
-
+import Data.Text (Text, toLower, unpack, append, length)
+import Prelude hiding (takeWhile, length)
 
 
 -- | Representation of a function's argument (name, type, is optional).
@@ -46,7 +45,7 @@ data PGArgument = PGArgument String String Bool deriving (Show, Eq)
 -- | Representation of a PostrgeSQL function signature (schema, name, arguments, result).
 data PGFunction = PGFunction String String [PGArgument] PGResult deriving (Show, Eq)
 
--- | Representation of a resultant's column (name, type). 
+-- | Representation of a resultant's column (name, type).
 data PGColumn = PGColumn String String deriving (Show, Eq)
 
 -- | Representation of a function's return value.
@@ -57,18 +56,15 @@ data PGResult = PGSingle String
 
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.
 parsePGFunction :: Text -> PGFunction
-parsePGFunction s = result where
-  result = case (parseOnly parseFunction s) of
-    Right x -> x
-
+parsePGFunction s = either error id (parseOnly parseFunction s) where
   ss = skipSpace
 
   parseFunction  = do
-    ss *> asciiCI "function" 
+    _      <- ss *> asciiCI "function"
     schema <- ss *> ((parseIdentifier <* (char '.')) <|> (string ""))
-    name <- ss *> parseIdentifier
-    args <- ss *> char '(' *> (parseArgs `sepBy` (char ','))
-    ret  <- ss *> char ')' *> parseReturn
+    name   <- ss *> parseIdentifier
+    args   <- ss *> char '(' *> (parseArgs `sepBy` (char ','))
+    ret    <- ss *> char ')' *> parseReturn
     return $ PGFunction (unpack schema) (unpack name) args ret
 
   parseArgs = do
@@ -79,7 +75,7 @@ parsePGFunction s = result where
     -- Here is a quick and dirty implementation of the parser.
 
     return $ PGArgument (unpack name) (unpack datatype) ((length def) > 0)
- 
+
   parseCols = do
     name     <- ss *> parseIdentifier
     datatype <- ss *> parseType <* ss
@@ -103,20 +99,20 @@ parsePGFunction s = result where
 
   parseType = toLower <$> (foldr1 (<|>) $
        (map asciiCI [ "double precision" ])
-    ++ (map (\s -> (asciiCI s <* ss <* (parseModifiers 1))) ["bit", "character varying"])
-    ++ (map (\s -> (asciiCI s <* ss <* (parseModifiers 2))) ["numeric", "decimal"])
+    ++ (map (\t -> (asciiCI t <* ss <* (parseModifiers 1))) ["bit", "character varying"])
+    ++ (map (\t -> (asciiCI t <* ss <* (parseModifiers 2))) ["numeric", "decimal"])
     ++ (map parseTime ["timestamp", "time"])
     ++ [parseInterval, parseIdentifier <* (parseModifiers 4)])
   -- WARNING: user defined types can have more complex modifiers.
   -- The argument of parseModifiers might be a subject to change.
 
-  parseTime s = do
-    base <- asciiCI s <* ss <* (parseModifiers 1)
+  parseTime t = do
+    base <- asciiCI t <* ss <* (parseModifiers 1)
     tz <- ss *> ((asciiCI "with time zone") <|> (asciiCI "without time zone") <|> (string ""))
     return $ case tz of
       "" -> base
       _  -> base `append` " " `append` tz
- 
+
   parseInterval = do
     base <- (asciiCI "interval") <* ss
     fields <- foldr1 (<|>) $ map asciiCI [
@@ -134,19 +130,19 @@ parsePGFunction s = result where
       , "minute"
       , "second"
       , ""]
-    ss *> (parseModifiers 1)
+    _ <- ss *> (parseModifiers 1)
 
     return $ case fields of
       "" -> base
       _  -> base `append` " " `append` fields
- 
+
 
   parseModifiers n = ((char '(') *>(foldl (*>)
-                                          (ss *> decimal *> ss)
-                                          (replicate (n - 1) (char ',' *> ss *> decimal *> ss)))
+                                          (ss *> (decimal :: Parser Int) *> ss)
+                                          (replicate (n - 1) (char ',' *> ss *> (decimal :: Parser Int) *> ss)))
                                 *> (char ')') *> (string ""))
                  <|> (case n of
                         1 -> (string "")
                         _ -> (parseModifiers (n - 1)))
-                        
+
 

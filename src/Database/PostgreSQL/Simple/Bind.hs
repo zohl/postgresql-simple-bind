@@ -12,7 +12,7 @@
   faciliates and automates bindings creation. This is especially useful in a
   design pattern where an application communicates with a database via API hiding
   the internal structure of the latter.
-  
+
 -}
 
 module Database.PostgreSQL.Simple.Bind (

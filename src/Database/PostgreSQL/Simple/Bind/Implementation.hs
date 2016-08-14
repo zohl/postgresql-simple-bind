@@ -11,7 +11,7 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE FlexibleInstances          #-} 
+{-# LANGUAGE FlexibleInstances          #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Implementation
@@ -27,20 +27,17 @@ module Database.PostgreSQL.Simple.Bind.Implementation (
   , PostgresType
   ) where
 
-import Control.Applicative
-import Data.List
-import Data.Text                    (Text, toLower, pack, unpack)
-import Data.Time
-import Data.Maybe
+import Data.List (intersperse)
+import Data.Text (Text)
 import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.FromField
+import Database.PostgreSQL.Simple.Bind.Representation
+import Database.PostgreSQL.Simple.Bind.Util (unwrapRow, unwrapColumn, mkFunctionName, Options(..))
+import Database.PostgreSQL.Simple.FromField (FromField)
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.Types
 import GHC.TypeLits
 import Language.Haskell.TH.Syntax
 import qualified Data.ByteString.Char8 as BS
-import Database.PostgreSQL.Simple.Bind.Util (unwrapRow, unwrapColumn, mkFunctionName, Options(..))
-import Database.PostgreSQL.Simple.Bind.Representation
 
 
 -- | Mapping from PostgreSQL types to Haskell types.
@@ -49,7 +46,7 @@ type family PostgresType (a :: Symbol)
 
 -- | Function that constructs binding for PostgreSQL stored function by it's signature.
 bindFunction :: Options -> Text -> Q [Dec]
-bindFunction opt = (mkFunction opt) . parsePGFunction 
+bindFunction opt = (mkFunction opt) . parsePGFunction
 
 
 
@@ -63,13 +60,15 @@ instance ToField Argument where
 
 
 formatArgument :: Argument -> String
-formatArgument (MandatoryArg name _) = "?"
+formatArgument (MandatoryArg _name _) = "?"
 formatArgument (OptionalArg name (Just _)) = name ++ " => ?"
+formatArgument (OptionalArg _ Nothing) = error "TODO"
+
 
 formatArguments :: [Argument] -> String
 formatArguments = concat . (intersperse ",") . (map formatArgument)
 
-  
+
 isActual :: Argument -> Bool
 isActual (OptionalArg _ Nothing)  = False
 isActual _                        = True
@@ -83,13 +82,14 @@ filterArguments = filter isActual
 mkFunction :: Options -> PGFunction -> Q [Dec]
 mkFunction opt f = sequence $ (($ f) . ($ opt)) <$> [mkFunctionT, mkFunctionE]
 
+postgresT :: String -> Type
 postgresT t = AppT (ConT ''PostgresType) (LitT (StrTyLit t))
 
 mkContextT :: Name -> String -> Name -> [Type]
 mkContextT c t n = [
     EqualityT `AppT` (postgresT t) `AppT` (VarT n)
   , (ConT c) `AppT` (VarT n)] where
-  
+
 
 mkResultT :: PGResult -> Q ([Name], [Type], Type)
 
@@ -116,13 +116,13 @@ mkArgsT cs = do
   let defWrap d = case d of
         True  -> AppT (ConT ''Maybe)
         False -> id
-        
-  let clause = zipWith (\(PGArgument _ _ d) -> (defWrap d) . VarT) cs names 
+
+  let clause = zipWith (\(PGArgument _ _ d) -> (defWrap d) . VarT) cs names
   return (names, context, clause)
 
 
 mkFunctionT :: Options -> PGFunction -> Q Dec
-mkFunctionT opt f@(PGFunction schema name args ret) = do
+mkFunctionT opt f@(PGFunction _schema _name args ret) = do
   (argNames, argContext, argClause) <- mkArgsT args
   (retNames, retContext, retClause) <- mkResultT ret
 
@@ -135,13 +135,13 @@ mkFunctionT opt f@(PGFunction schema name args ret) = do
   return $ SigD (mkName (mkFunctionName opt f)) $ ForallT vars context clause
 
 
- 
+
 mkSqlQuery :: PGFunction -> Name -> Exp
-mkSqlQuery (PGFunction schema name args ret) argsName = toQuery $ foldr1 AppE [
+mkSqlQuery (PGFunction schema name _args ret) argsName = toQuery $ foldr1 AppE [
       (AppE (VarE '(++)) (mkStrLit $ concat [prefix, " ", functionName, "("]))
     , (AppE (VarE '(++)) ((VarE 'formatArguments) `AppE` (VarE argsName)))
     , (mkStrLit ")")] where
-  
+
   prefix = case ret of
     PGTable _ -> "select * from"
     _         -> "select"
@@ -149,13 +149,13 @@ mkSqlQuery (PGFunction schema name args ret) argsName = toQuery $ foldr1 AppE [
   functionName = case schema of
     "" -> name
     _  -> schema ++ "." ++ name
-  
+
   mkStrLit s = LitE (StringL s)
 
   toQuery = AppE (ConE 'Query) . AppE (VarE 'BS.pack)
 
-  
-  
+
+
 unwrapE :: PGResult -> Exp -> Exp
 unwrapE (PGSingle _) q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
 unwrapE (PGSetOf _) q = (VarE 'fmap) `AppE` (VarE 'unwrapColumn) `AppE` q
@@ -163,7 +163,7 @@ unwrapE (PGTable _) q = q
 
 
 mkFunctionE :: Options -> PGFunction -> Q Dec
-mkFunctionE opt f@(PGFunction schema name args ret) = do
+mkFunctionE opt f@(PGFunction _schema _name args ret) = do
   names <- sequence $ replicate (length args) (newName "x")
 
   connName <- newName "conn"
@@ -182,9 +182,8 @@ mkFunctionE opt f@(PGFunction schema name args ret) = do
   let wrapArg (PGArgument n _ d) argName = foldl1 AppE $ case d of
         False -> [(ConE 'MandatoryArg), (LitE (StringL n)), (VarE argName)]
         True  -> [(ConE 'OptionalArg), (LitE (StringL n)), (VarE argName)]
-        --True  -> [(ConE 'OptionalArg), (LitE (StringL n)), ((ConE 'Just) `AppE` (VarE argName))]
 
   let argsBody = NormalB $ (VarE 'filterArguments) `AppE` (ListE $ zipWith wrapArg args names)
 
   return $ FunD funcName [Clause funcArgs funcBody [ValD (VarP argsName) argsBody []]]
-  
+

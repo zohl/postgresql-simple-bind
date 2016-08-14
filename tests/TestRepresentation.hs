@@ -70,7 +70,7 @@ schemaTests = "schema" ~: [
 
 testRepresentation :: Test
 testRepresentation = TestList $ [
-    simpleTests  
+    simpleTests
   , defaultValuesTests
   , returnValuesTests
   , returnValuesTests

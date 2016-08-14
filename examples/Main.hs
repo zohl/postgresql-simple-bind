@@ -6,18 +6,18 @@ import System.IO
 import System.Exit
 import Database.PostgreSQL.Simple
 
-import Common          (TestEnv(..), connectInfo)
+import Common          (TestEnv(..))
 import ExNumDumpster
 import ExUsers
 import ExMessages
 
 testEnv :: TestEnv
 testEnv = TestEnv {
-    connectInfo = ConnectInfo {
+    envConnectInfo = ConnectInfo {
         connectHost     = "localhost"
       , connectPort     = 5432
-      , connectDatabase = "test"
-      , connectUser     = "test"
+      , connectDatabase = "test_db"
+      , connectUser     = "test_role"
       , connectPassword = "TEST"
       }
   }
@@ -32,7 +32,7 @@ tests = [
 main :: IO ()
 main = do
   mapM_ (`hSetBuffering` LineBuffering) [stdout, stderr]
- 
+
   Counts {cases, tried, errors, failures} <- runTestTT $ TestList $ map ($ testEnv) tests
   when (cases /= tried || errors /= 0 || failures /= 0) $ exitFailure
 
