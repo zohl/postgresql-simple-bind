@@ -188,19 +188,3 @@ mkFunctionE opt f@(PGFunction schema name args ret) = do
 
   return $ FunD funcName [Clause funcArgs funcBody [ValD (VarP argsName) argsBody []]]
   
-
-
-
--- sqlGetVal :: forall x_acMJ y_acMK.
---   (PostgresType "bigint" ~ x_acMJ, ToField x_acMJ,
---    PostgresType "bigint" ~ y_acMK, FromField y_acMK)
---    => Connection -> Maybe x_acMJ -> IO y_acMK
--- 
--- sqlGetVal conn_acMM x_acML =
---   fmap unwrapRow
---     (query
---       conn_acMM
---       (Query (pack ((++) "select get_val(" ((++) (formatArguments args_acMN) ")")))) args_acMN)
---       where
---         args_acMN = filterArguments [OptionalArg "p_number" (Just x_acML)]
-
