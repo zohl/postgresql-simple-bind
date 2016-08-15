@@ -61,7 +61,7 @@ instance ToField Argument where
 
 formatArgument :: Argument -> String
 formatArgument (MandatoryArg _name _) = "?"
-formatArgument (OptionalArg name (Just _)) = name ++ " => ?"
+formatArgument (OptionalArg name (Just _)) = name ++ " := ?"
 formatArgument (OptionalArg _ Nothing) = error "TODO"
 
 
