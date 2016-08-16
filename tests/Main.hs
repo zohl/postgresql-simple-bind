@@ -1,23 +1,31 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 
-import Test.HUnit
-import Control.Monad
-import System.IO
-import System.Exit
-
-import TestRepresentation
-
-
-tests :: [Test]
-tests = [
-      TestLabel "Representation" testRepresentation
-    ]
+import Control.Monad (unless)
+-- import Data.WithLocation (WithLocation)
+import Test.Hspec
+import Test.Hspec.Expectations (expectationFailure)
+-- import Test.Hspec.Wai (with)
+import Database.PostgreSQL.Simple.Bind.Representation
+import Data.Text ()
 
 main :: IO ()
-main = do
-  mapM_ (`hSetBuffering` LineBuffering) [stdout, stderr]
+main = hspec spec
 
-  Counts {cases, tried, errors, failures} <- runTestTT $ TestList tests
-  when (cases /= tried || errors /= 0 || failures /= 0) $ exitFailure
+spec :: Spec
+spec = do
+  describe "simple signatures" $ do
+    it "works with simple signatures" $ do
+      (parsePGFunction "function f(x bigint) returns bigint") `shouldBe`
+        (PGFunction "" "f" [PGArgument "x" "bigint" False] (PGSingle "bigint"))
+
+      (parsePGFunction "function g(x bigint, y varchar) returns void") `shouldBe`
+        (PGFunction "" "g" [PGArgument "x" "bigint" False, PGArgument "y" "varchar" False]
+          (PGSingle "void"))
+
+      (parsePGFunction "function h() returns varchar") `shouldBe`
+        (PGFunction "" "h" [] (PGSingle "varchar"))
+
+      (parsePGFunction "FUNCTION H(Z VARCHAR) RETURNS BIGINT") `shouldBe`
+        (PGFunction "" "h" [PGArgument "z" "varchar" False] (PGSingle "bigint"))
 

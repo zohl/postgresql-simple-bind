@@ -11,23 +11,6 @@ import Data.Text ()
 import TestTypes
 
 
-simpleTests :: Test
-simpleTests = "simple" ~: [
-    (parsePGFunction "function f(x bigint) returns bigint")
-    ~?= (PGFunction "" "f" [PGArgument "x" "bigint" False] (PGSingle "bigint"))
-
-  , (parsePGFunction "function g(x bigint, y varchar) returns void")
-    ~?= (PGFunction "" "g"
-          [PGArgument "x" "bigint" False, PGArgument "y" "varchar" False ] (PGSingle "void"))
-
-  , (parsePGFunction "function h() returns varchar")
-    ~?= (PGFunction "" "h" [] (PGSingle "varchar"))
-
-  , (parsePGFunction "FUNCTION H(Z VARCHAR) RETURNS BIGINT")
-    ~?= (PGFunction "" "h" [PGArgument "z" "varchar" False] (PGSingle "bigint"))
-  ]
-
-
 defaultValuesTests :: Test
 defaultValuesTests = "default values" ~: [
     (parsePGFunction "function f(x bigint default 0::bigint) returns void")

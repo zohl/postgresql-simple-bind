@@ -60,6 +60,8 @@ test-suite tests
   build-depends: base >= 4.8 && < 5.0
                , bytestring >= 0.10.8 && < 0.11
                , HUnit
+               , hspec2
+               , hspec-expectations
                , postgresql-simple >= 0.5.2 && < 0.6
                , postgresql-simple-bind
                , text >= 1.2.2 && < 1.3
