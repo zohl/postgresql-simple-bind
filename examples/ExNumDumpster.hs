@@ -12,16 +12,14 @@
 
 
 module ExNumDumpster (
-    numDumpster
+    specNumDumpster
   ) where
 
-import Test.HUnit
+import Test.Hspec
 import Database.PostgreSQL.Simple
-
 import Database.PostgreSQL.Simple.Bind (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Types()
-
-import Common (bindOptions, TestEnv, mkTest, include)
+import Common
 
 
 concat <$> mapM (bindFunction bindOptions) [
@@ -47,24 +45,22 @@ iterFib conn = do
   addManyNums conn [x, x']
   return x'
 
+specNumDumpster :: Connection -> Spec
+specNumDumpster conn = describe "NumDumpster example" $ it "works" $ do
+  include conn "./examples/sql/numdumpster.sql"
 
-numDumpster :: TestEnv -> Test
-numDumpster = mkTest (flip include "./examples/sql/numdumpster.sql")
-  (\conn -> do
-      sqlAddNum conn 1
-      sqlGetLastNum conn >>= \x -> assertEqual "check get_last_num" 1 x
+  sqlAddNum conn 1
+  sqlGetLastNum conn >>= shouldBe 1
 
-      sqlClear conn
-      addManyNums conn [1, 2, 3, 4]
-      sqlGetAllNums conn >>= \xs -> assertEqual "check get_all_nums" [1, 2, 3, 4] xs
+  sqlClear conn
+  addManyNums conn [1, 2, 3, 4]
+  sqlGetAllNums conn >>= shouldBe [1, 2, 3, 4]
 
-      sqlGetRange conn Nothing Nothing   >>= \xs -> assertEqual "check get_range" [1, 2, 3, 4] xs
-      sqlGetRange conn (Just 2) (Just 3) >>= \xs -> assertEqual "check get_range" [2, 3] xs
-      sqlGetRange conn Nothing (Just 3)  >>= \xs -> assertEqual "check get_range" [1, 2, 3] xs
-      sqlGetRange conn (Just 2) Nothing  >>= \xs -> assertEqual "check get_range" [2, 3, 4] xs
+  sqlGetRange conn Nothing Nothing   >>= shouldBe [1, 2, 3, 4]
+  sqlGetRange conn (Just 2) (Just 3) >>= shouldBe [2, 3]
+  sqlGetRange conn Nothing (Just 3)  >>= shouldBe [1, 2, 3]
+  sqlGetRange conn (Just 2) Nothing  >>= shouldBe [2, 3, 4]
 
-      sqlClear conn
-      addManyNums conn [0, 1]
-      ((head . reverse) <$> (sequence $ replicate 11 (iterFib conn))) >>=
-         \x -> assertEqual "check 11th fibonacci number" 144 x)
-
+  sqlClear conn
+  addManyNums conn [0, 1]
+  ((head . reverse) <$> (sequence $ replicate 11 (iterFib conn))) >>= shouldBe 144
