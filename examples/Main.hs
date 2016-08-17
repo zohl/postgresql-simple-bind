@@ -1,38 +1,26 @@
-{-# LANGUAGE NamedFieldPuns #-}
+import Common (withDB, withRollback)
+import Data.Text ()
+import Database.PostgreSQL.Simple (Connection, ConnectInfo(..))
+import ExMessages (specMessages)
+import ExNumDumpster (specNumDumpster)
+import ExUsers (specUsers)
+import Test.Hspec (Spec, hspec)
 
-import Test.HUnit
-import Control.Monad
-import System.IO
-import System.Exit
-import Database.PostgreSQL.Simple
-
-import Common          (TestEnv(..))
-import ExNumDumpster
-import ExUsers
-import ExMessages
-
-testEnv :: TestEnv
-testEnv = TestEnv {
-    envConnectInfo = ConnectInfo {
-        connectHost     = "localhost"
-      , connectPort     = 5432
-      , connectDatabase = "test_db"
-      , connectUser     = "test_role"
-      , connectPassword = "TEST"
-      }
-  }
-
-tests :: [TestEnv -> Test]
-tests = [
-      TestLabel "NumDumpster" . numDumpster
-    , TestLabel "Users"       . users
-    , TestLabel "Messages"    . messages
-    ]
+connectInfo :: ConnectInfo
+connectInfo = ConnectInfo {
+      connectHost     = "localhost"
+    , connectPort     = 5432
+    , connectDatabase = "test_db"
+    , connectUser     = "test_role"
+    , connectPassword = "TEST"
+    }
 
 main :: IO ()
-main = do
-  mapM_ (`hSetBuffering` LineBuffering) [stdout, stderr]
+main = withDB connectInfo $ withRollback $ hspec . spec
 
-  Counts {cases, tried, errors, failures} <- runTestTT $ TestList $ map ($ testEnv) tests
-  when (cases /= tried || errors /= 0 || failures /= 0) $ exitFailure
-
+spec :: Connection -> Spec
+spec conn = mapM_ ($ conn) [
+    specNumDumpster
+  , specUsers
+  , specMessages
+  ]

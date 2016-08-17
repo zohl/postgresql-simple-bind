@@ -14,15 +14,15 @@
 
 
 module ExMessages (
-    messages
+    specMessages
   ) where
 
-import Test.HUnit
+import Common (bindOptions, include)
+import Database.PostgreSQL.Simple (Connection)
 import Database.PostgreSQL.Simple.Bind (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Types()
-import Database.PostgreSQL.Simple (Connection)
 import Prelude hiding (getContents)
-import Common (bindOptions, TestEnv, mkTest, include)
+import Test.Hspec (Spec, describe, it, shouldBe)
 
 concat <$> mapM (bindFunction bindOptions) [
     "function send_message(p_receiver varchar, p_contents varchar) returns bigint"
@@ -31,35 +31,28 @@ concat <$> mapM (bindFunction bindOptions) [
   ]
 
 
-runTests :: Int -> Connection -> IO ()
-runTests n conn = do
-  let getId (x, _, _) = x
+specMessages :: Connection -> Spec
+specMessages conn = describe "Messages example" $ it "works" $ mapM_ runTests [
+    "./examples/sql/messages.sql"
+  , "./examples/sql/messages-patch-1.sql"
+  , "./examples/sql/messages-patch-2.sql"
+  ] where
 
-  msg1 <- sqlSendMessage conn "mr_foo" "hello!"
-  msg2 <- sqlSendMessage conn "mr_bar" "hello!"
-  msg3 <- sqlSendMessage conn "mr_bar" "hello again!"
+  getId (x, _, _) = x
 
-  sqlGetNewMessages conn "mr_foo" >>= \xs ->
-    assertEqual ("check get_new_messages " ++ (show n) ++ ".1") [msg1] (map getId xs)
+  runTests fn = do
+    include conn fn
 
-  sqlGetNewMessages conn "mr_bar" >>= \xs ->
-    assertEqual ("check get_new_messages " ++ (show n) ++ ".2") [msg2, msg3] (map getId xs)
+    msg1 <- sqlSendMessage conn "mr_foo" "hello!"
+    msg2 <- sqlSendMessage conn "mr_bar" "hello!"
+    msg3 <- sqlSendMessage conn "mr_bar" "hello again!"
 
-  sqlMarkAsRead conn "mr_bar" msg2
+    sqlGetNewMessages conn "mr_foo" >>= shouldBe [msg1] . map getId
+    sqlGetNewMessages conn "mr_bar" >>= shouldBe [msg2, msg3] . map getId
 
-  sqlGetNewMessages conn "mr_bar" >>= \xs ->
-    assertEqual ("check get_new_messages " ++ (show n) ++ ".3") [msg3] (map getId xs)
+    sqlMarkAsRead conn "mr_bar" msg2
 
-  sqlMarkAsRead conn "mr_foo" msg1
-  sqlMarkAsRead conn "mr_bar" msg3
+    sqlGetNewMessages conn "mr_bar" >>= shouldBe [msg3] . map getId
 
-
-messages :: TestEnv -> Test
-messages = mkTest (flip include "./examples/sql/messages.sql")
-  (\conn -> do
-     runTests 1 conn
-     include conn "./examples/sql/messages-patch-1.sql"
-     runTests 2 conn
-     include conn "./examples/sql/messages-patch-2.sql"
-     runTests 3 conn)
-
+    sqlMarkAsRead conn "mr_foo" msg1
+    sqlMarkAsRead conn "mr_bar" msg3
