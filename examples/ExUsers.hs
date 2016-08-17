@@ -12,19 +12,17 @@
 
 
 module ExUsers (
-    users
+    specUsers
   ) where
 
-import Test.HUnit
+import Common (bindOptions, include)
+import Data.Attoparsec.ByteString.Char8 (parseOnly, decimal, char, notChar, many')
+import Data.Text (Text)
+import Database.PostgreSQL.Simple (Connection)
 import Database.PostgreSQL.Simple.Bind (bindFunction, PostgresType)
 import Database.PostgreSQL.Simple.Bind.Types()
-
-import Data.Attoparsec.ByteString.Char8 (parseOnly, decimal, char, notChar, many')
-import Database.PostgreSQL.Simple.FromField
-
-import Data.Text (Text)
-import Common (bindOptions, TestEnv, mkTest, include)
-
+import Database.PostgreSQL.Simple.FromField (FromField(..), ResultError(..), typename, returnError)
+import Test.Hspec (Spec, describe, it, shouldBe)
 
 concat <$> mapM (bindFunction bindOptions) [
     "function get_users(p_filter varchar2 default '') returns setof t_user"
@@ -64,21 +62,17 @@ instance FromField User where
       return $ User { userId = userId', userName = userName', userAge = userAge' }
 
 
-users :: TestEnv -> Test
-users = mkTest (flip include "./examples/sql/users.sql")
-  (\conn -> do
-      mrFooId <- sqlAddUser conn "Mr. Foo" 42
-      mrBarId <- sqlAddUser conn "Mr. Bar" 53
-      mrBazId <- sqlAddUser conn "Mr. Baz" 64
+specUsers :: Connection -> Spec
+specUsers conn = describe "Users example" $ it "works" $ do
+  include conn "./examples/sql/users.sql"
 
-      sqlGetUsers conn Nothing >>=
-        \xs -> assertEqual "check get_users" [mrFooId, mrBarId, mrBazId] (map userId xs)
+  mrFooId <- sqlAddUser conn "Mr. Foo" 42
+  mrBarId <- sqlAddUser conn "Mr. Bar" 53
+  mrBazId <- sqlAddUser conn "Mr. Baz" 64
 
-      sqlGetUsers conn (Just "Mr. Ba_") >>=
-        \xs -> assertEqual "check get_users 2" [mrBarId, mrBazId] (map userId xs)
+  sqlGetUsers conn Nothing >>= shouldBe [mrFooId, mrBarId, mrBazId] . map userId
+  sqlGetUsers conn (Just "Mr. Ba_") >>= shouldBe [mrBarId, mrBazId] . map userId
+  sqlDelUser conn mrBarId
 
-      sqlDelUser conn mrBarId
-
-      sqlGetUsers conn Nothing >>=
-        \xs -> assertEqual "check get_users 3" [mrFooId, mrBazId] (map userId xs))
+  sqlGetUsers conn Nothing >>= shouldBe [mrFooId, mrBazId] . map userId
 

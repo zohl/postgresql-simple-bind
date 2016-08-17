@@ -5,12 +5,11 @@ module Common (
   , bindOptions
   ) where
 
-import Control.Exception.Base
-import Text.CaseConversion
-import Test.Hspec
-import Database.PostgreSQL.Simple
+import Control.Exception.Base (bracket)
+import Database.PostgreSQL.Simple (Connection, ConnectInfo, connect, begin, rollback, close, execute_)
 import Database.PostgreSQL.Simple.Bind (Options(..), defaultOptions)
-import Database.PostgreSQL.Simple.Types
+import Database.PostgreSQL.Simple.Types (Query(..))
+import Text.CaseConversion (convertCase, WordCase(..))
 import qualified Data.ByteString.Char8 as BS
 
 bindOptions :: Options

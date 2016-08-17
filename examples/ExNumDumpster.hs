@@ -15,11 +15,11 @@ module ExNumDumpster (
     specNumDumpster
   ) where
 
-import Test.Hspec
-import Database.PostgreSQL.Simple
+import Common (bindOptions, include)
+import Database.PostgreSQL.Simple (Connection)
 import Database.PostgreSQL.Simple.Bind (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Types()
-import Common
+import Test.Hspec (Spec, describe, it, shouldBe)
 
 
 concat <$> mapM (bindFunction bindOptions) [
@@ -32,7 +32,7 @@ concat <$> mapM (bindFunction bindOptions) [
 
 
 addManyNums :: Connection -> [Int] -> IO ()
-addManyNums conn xs = sequence_ $ map (sqlAddNum conn) xs
+addManyNums conn xs = mapM_ (sqlAddNum conn) xs
 
 getSum :: Connection -> IO Int
 getSum conn = sum <$> (sqlGetAllNums conn)

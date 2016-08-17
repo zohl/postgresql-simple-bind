@@ -1,14 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE NamedFieldPuns    #-}
-
-import Test.Hspec
-import Database.PostgreSQL.Simple.Bind.Representation
+import Common (withDB, withRollback)
 import Data.Text ()
-import Database.PostgreSQL.Simple
-import Common
-import ExNumDumpster
--- import ExUsers
--- import ExMessages
+import Database.PostgreSQL.Simple (Connection, ConnectInfo(..))
+import ExMessages (specMessages)
+import ExNumDumpster (specNumDumpster)
+import ExUsers (specUsers)
+import Test.Hspec (Spec, hspec)
 
 connectInfo :: ConnectInfo
 connectInfo = ConnectInfo {
@@ -23,5 +19,8 @@ main :: IO ()
 main = withDB connectInfo $ withRollback $ hspec . spec
 
 spec :: Connection -> Spec
-spec conn = do
-  specNumDumpster conn
+spec conn = mapM_ ($ conn) [
+    specNumDumpster
+  , specUsers
+  , specMessages
+  ]
