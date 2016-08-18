@@ -56,64 +56,63 @@ data PGResult = PGSingle String
 
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.
 parsePGFunction :: Text -> PGFunction
-parsePGFunction s = either error id (parseOnly parseFunction s) where
+parsePGFunction s = either error id (parseOnly (ss *> function) s) where
   ss = skipSpace
 
-  parseFunction  = do
-    _      <- ss *> asciiCI "function"
-    schema <- ss *> ((parseIdentifier <* (char '.')) <|> (string ""))
-    name   <- ss *> parseIdentifier
-    args   <- ss *> char '(' *> (parseArgs `sepBy` (char ','))
-    ret    <- ss *> char ')' *> parseReturn
+  function = do
+    _      <- asciiCI "function"
+    schema <- ss *> ((identifier <* (char '.')) <|> (string ""))
+    name   <- ss *> identifier
+    args   <- ss *> char '(' *> (arguments `sepBy` (char ','))
+    ret    <- ss *> char ')' *> returnType
+    _      <- ss
     return $ PGFunction (unpack schema) (unpack name) args ret
 
-  parseArgs = do
-    name     <- ss *> parseIdentifier
-    datatype <- ss *> parseType
+  arguments = do
+    name     <- ss *> identifier
+    datatype <- ss *> postgresType
     def      <- ss *> ((asciiCI "default" <|> string "=") *> (takeTill (inClass ",)")) <|> (string ""))
     -- WARNING: parsing default values requires ability to parse almost arbitraty expressions.
     -- Here is a quick and dirty implementation of the parser.
 
     return $ PGArgument (unpack name) (unpack datatype) ((length def) > 0)
 
-  parseCols = do
-    name     <- ss *> parseIdentifier
-    datatype <- ss *> parseType <* ss
+  cols = do
+    name     <- ss *> identifier
+    datatype <- ss *> postgresType <* ss
     return $ PGColumn (unpack name) (unpack datatype)
 
-  parseReturn = do
+  returnType = do
     ret <- ss *> asciiCI "returns" *> ss *> (
                asciiCI "setof"
            <|> asciiCI "table"
-           <|> parseType)
+           <|> postgresType)
 
     case toLower(ret) of
-      "setof" -> (PGSetOf . unpack) <$> (ss *> parseType)
-      "table" -> PGTable <$> (ss *> char '(' *> parseCols `sepBy` (char ',') <* ss <* char ')')
+      "setof" -> (PGSetOf . unpack) <$> (ss *> postgresType)
+      "table" -> PGTable <$> (ss *> char '(' *> cols `sepBy` (char ',') <* ss <* char ')')
       t       -> return $ PGSingle (unpack t)
 
-  parseIdentifier = do
+  identifier = do
     s1 <- takeWhile1 (inClass "a-zA-Z_")
     s2 <- takeWhile (inClass "a-zA-Z_0-9$")
     return $ toLower $ s1 `append` s2
 
-  parseType = toLower <$> (foldr1 (<|>) $
+  postgresType = toLower <$> (foldr1 (<|>) $
        (map asciiCI [ "double precision" ])
-    ++ (map (\t -> (asciiCI t <* ss <* (parseModifiers 1))) ["bit", "character varying"])
-    ++ (map (\t -> (asciiCI t <* ss <* (parseModifiers 2))) ["numeric", "decimal"])
-    ++ (map parseTime ["timestamp", "time"])
-    ++ [parseInterval, parseIdentifier <* (parseModifiers 4)])
-  -- WARNING: user defined types can have more complex modifiers.
-  -- The argument of parseModifiers might be a subject to change.
+    ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 1))) ["bit", "character varying"])
+    ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 2))) ["numeric", "decimal"])
+    ++ (map timeType ["timestamp", "time"])
+    ++ [intervalType, identifier <* (modifiers Nothing)])
 
-  parseTime t = do
-    base <- asciiCI t <* ss <* (parseModifiers 1)
+  timeType t = do
+    base <- asciiCI t <* ss <* (modifiers $ Just 1)
     tz <- ss *> ((asciiCI "with time zone") <|> (asciiCI "without time zone") <|> (string ""))
     return $ case tz of
       "" -> base
       _  -> base `append` " " `append` tz
 
-  parseInterval = do
+  intervalType = do
     base <- (asciiCI "interval") <* ss
     fields <- foldr1 (<|>) $ map asciiCI [
         "year to month"
@@ -130,19 +129,22 @@ parsePGFunction s = either error id (parseOnly parseFunction s) where
       , "minute"
       , "second"
       , ""]
-    _ <- ss *> (parseModifiers 1)
+    _ <- ss *> (modifiers $ Just 1)
 
     return $ case fields of
       "" -> base
       _  -> base `append` " " `append` fields
 
 
-  parseModifiers n = ((char '(') *>(foldl (*>)
-                                          (ss *> (decimal :: Parser Int) *> ss)
-                                          (replicate (n - 1) (char ',' *> ss *> (decimal :: Parser Int) *> ss)))
-                                *> (char ')') *> (string ""))
-                 <|> (case n of
-                        1 -> (string "")
-                        _ -> (parseModifiers (n - 1)))
+  modifiers limit = (char '(') *> exact <* (char ')') <|> less where
+    exact = ($ limit) $ maybe
+      ((modifier `sepBy` (char ',')) *> (string ""))
+      (\n -> foldl1 ((*>) . (*> ((char ',') *> ss))) (replicate n modifier) *> string "")
 
+    less = ($ limit) $ maybe
+      (string "")
+      (\n -> case n of
+          1 -> (string "")
+          _ -> (modifiers $ Just (n - 1)))
 
+  modifier = (decimal :: Parser Int) *> ss

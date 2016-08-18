@@ -94,6 +94,9 @@ spec = do
       (parsePGFunction "function f(x numeric(10,3)) returns void") `shouldBe`
         (PGFunction "" "f" [PGArgument "x" "numeric" False] (PGSingle "void"))
 
+      (parsePGFunction "function f(x user_defined_type(1,2,3,4)) returns void") `shouldBe`
+        (PGFunction "" "f" [PGArgument "x" "user_defined_type" False] (PGSingle "void"))
+
 
     it "works for time types" $ do
       (parsePGFunction "function f(x time) returns void") `shouldBe`
