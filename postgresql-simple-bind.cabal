@@ -25,6 +25,7 @@ library
   build-depends: base >= 4.7 && < 5.0
                , attoparsec >= 0.13.0 && < 0.14
                , bytestring >= 0.10.8 && < 0.11
+               , data-default
                , heredoc >= 0.2.0 && < 0.3
                , postgresql-simple >= 0.5.2 && < 0.6
                , template-haskell >= 2.11.0 && < 2.12
@@ -34,9 +35,10 @@ library
   hs-source-dirs: src
   exposed-modules:
      Database.PostgreSQL.Simple.Bind
-     Database.PostgreSQL.Simple.Bind.Types
-     Database.PostgreSQL.Simple.Bind.Util
+     Database.PostgreSQL.Simple.Bind.Common
      Database.PostgreSQL.Simple.Bind.Representation
+     Database.PostgreSQL.Simple.Bind.Types
+     Database.PostgreSQL.Simple.Bind.Utils
 
   other-modules:
      Database.PostgreSQL.Simple.Bind.Implementation
@@ -84,6 +86,7 @@ test-suite examples
                , attoparsec >= 0.13.0 && < 0.14
                , bytestring >= 0.10.8 && < 0.11
                , case-conversion
+               , data-default
                , hspec
                , postgresql-simple >= 0.5.2 && < 0.6
                , postgresql-simple-bind

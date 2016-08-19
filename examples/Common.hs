@@ -5,16 +5,21 @@ module Common (
   , bindOptions
   ) where
 
+import Data.Default (def)
 import Control.Exception.Base (bracket)
 import Database.PostgreSQL.Simple (Connection, ConnectInfo, connect, begin, rollback, close, execute_)
-import Database.PostgreSQL.Simple.Bind (Options(..), defaultOptions)
+import Database.PostgreSQL.Simple.Bind (PostgresBindOptions(..), PGFunction(..))
 import Database.PostgreSQL.Simple.Types (Query(..))
 import Text.CaseConversion (convertCase, WordCase(..))
 import qualified Data.ByteString.Char8 as BS
 
-bindOptions :: Options
-bindOptions = defaultOptions {
-    nameModifier = convertCase Snake Camel . ("sql_" ++)
+mkFunctionName :: PGFunction -> String
+mkFunctionName (PGFunction _schema name _args _result)
+  = convertCase Snake Camel . ("sql_" ++) $ name
+
+bindOptions :: PostgresBindOptions
+bindOptions = (def :: PostgresBindOptions) {
+    pboFunctionName = mkFunctionName
   }
 
 withDB :: ConnectInfo -> (Connection -> IO a) -> IO a

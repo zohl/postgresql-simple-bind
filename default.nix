@@ -1,5 +1,5 @@
 { mkDerivation, attoparsec, base, bytestring, case-conversion
-, heredoc, hspec, HUnit, postgresql-simple, stdenv
+, data-default, heredoc, hspec, postgresql-simple, stdenv
 , template-haskell, text, time
 }:
 mkDerivation {
@@ -11,7 +11,7 @@ mkDerivation {
     template-haskell text time
   ];
   testHaskellDepends = [
-    attoparsec base bytestring case-conversion hspec HUnit
+    attoparsec base bytestring case-conversion data-default hspec
     postgresql-simple text
   ];
   description = "A FFI-like bindings for PostgreSQL stored functions";

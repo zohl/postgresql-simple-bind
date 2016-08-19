@@ -12,6 +12,7 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE RecordWildCards            #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Implementation
@@ -31,7 +32,7 @@ import Data.List (intersperse)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Bind.Representation
-import Database.PostgreSQL.Simple.Bind.Util (unwrapRow, unwrapColumn, mkFunctionName, Options(..))
+import Database.PostgreSQL.Simple.Bind.Common (unwrapRow, unwrapColumn, PostgresBindOptions(..))
 import Database.PostgreSQL.Simple.FromField (FromField)
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.Types
@@ -45,7 +46,7 @@ type family PostgresType (a :: Symbol)
 
 
 -- | Function that constructs binding for PostgreSQL stored function by it's signature.
-bindFunction :: Options -> Text -> Q [Dec]
+bindFunction :: PostgresBindOptions -> Text -> Q [Dec]
 bindFunction opt = (mkFunction opt) . parsePGFunction
 
 
@@ -79,7 +80,7 @@ filterArguments = filter isActual
 
 
 
-mkFunction :: Options -> PGFunction -> Q [Dec]
+mkFunction :: PostgresBindOptions -> PGFunction -> Q [Dec]
 mkFunction opt f = sequence $ (($ f) . ($ opt)) <$> [mkFunctionT, mkFunctionE]
 
 postgresT :: String -> Type
@@ -121,8 +122,8 @@ mkArgsT cs = do
   return (names, context, clause)
 
 
-mkFunctionT :: Options -> PGFunction -> Q Dec
-mkFunctionT opt f@(PGFunction _schema _name args ret) = do
+mkFunctionT :: PostgresBindOptions -> PGFunction -> Q Dec
+mkFunctionT (PostgresBindOptions {..}) f@(PGFunction _schema _name args ret) = do
   (argNames, argContext, argClause) <- mkArgsT args
   (retNames, retContext, retClause) <- mkResultT ret
 
@@ -132,7 +133,7 @@ mkFunctionT opt f@(PGFunction _schema _name args ret) = do
   let chain x = AppT (AppT ArrowT x)
   let clause = foldr1 chain $ (ConT ''Connection):(argClause ++ [AppT (ConT ''IO) retClause])
 
-  return $ SigD (mkName (mkFunctionName opt f)) $ ForallT vars context clause
+  return $ SigD (mkName $ pboFunctionName f) $ ForallT vars context clause
 
 
 
@@ -162,14 +163,14 @@ unwrapE (PGSetOf _) q = (VarE 'fmap) `AppE` (VarE 'unwrapColumn) `AppE` q
 unwrapE (PGTable _) q = q
 
 
-mkFunctionE :: Options -> PGFunction -> Q Dec
-mkFunctionE opt f@(PGFunction _schema _name args ret) = do
+mkFunctionE :: PostgresBindOptions -> PGFunction -> Q Dec
+mkFunctionE (PostgresBindOptions {..}) f@(PGFunction _schema _name args ret) = do
   names <- sequence $ replicate (length args) (newName "x")
 
   connName <- newName "conn"
   argsName <- newName "args"
 
-  let funcName = mkName $ mkFunctionName opt f
+  let funcName = mkName $ pboFunctionName f
 
   let funcArgs = (VarP connName):(map VarP names)
 
