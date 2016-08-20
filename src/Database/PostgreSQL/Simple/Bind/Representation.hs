@@ -29,14 +29,30 @@ module Database.PostgreSQL.Simple.Bind.Representation (
   , PGArgument(..)
   , PGColumn(..)
   , PGResult(..)
+  , PostgresBindException(..)
   , parsePGFunction
   ) where
 
 
-import Control.Applicative
-import Data.Attoparsec.Text
+import Control.Applicative ((*>), (<*), (<|>))
+import Control.Monad.Catch (MonadThrow(..), Exception, throwM)
+import Data.Attoparsec.Text (Parser, char, string, decimal, skipSpace, asciiCI, sepBy)
+import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, takeTill, inClass)
 import Data.Text (Text, toLower, unpack, append, length)
+import Data.Typeable (Typeable)
 import Prelude hiding (takeWhile, length)
+
+-- | The exception is thrown when something goes wrong with this package.
+data PostgresBindException
+  = ParserFailed String
+    -- ^ Thrown when parser fails to process a function
+    -- declaration. Arguments of the constructor: error message from the parser.
+  | DefaultValueNotFound String
+    -- ^ Thrown when 'Argument' expected to have default value while
+    -- it doesn't. Actually this should never happen, but we all know...
+  deriving (Eq, Show, Typeable)
+
+instance Exception PostgresBindException
 
 
 -- | Representation of a function's argument (name, type, is optional).
@@ -53,98 +69,101 @@ data PGResult = PGSingle String
               | PGSetOf String
               | PGTable [PGColumn] deriving (Show, Eq)
 
-
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.
-parsePGFunction :: Text -> PGFunction
-parsePGFunction s = either error id (parseOnly (ss *> function) s) where
-  ss = skipSpace
+parsePGFunction :: (MonadThrow m) => Text -> m PGFunction
+parsePGFunction s = either
+  (\err -> throwM . ParserFailed . concat $ ["In declaration `", unpack s, "`: ", err])
+  return
+  (parseOnly (ss *> function) s) where
+    ss = skipSpace
 
-  function = do
-    _      <- asciiCI "function"
-    schema <- ss *> ((identifier <* (char '.')) <|> (string ""))
-    name   <- ss *> identifier
-    args   <- ss *> char '(' *> (arguments `sepBy` (char ','))
-    ret    <- ss *> char ')' *> returnType
-    _      <- ss
-    return $ PGFunction (unpack schema) (unpack name) args ret
+    function = do
+      _      <- asciiCI "function"
+      schema <- ss *> ((identifier <* (char '.')) <|> (string ""))
+      name   <- ss *> identifier
+      args   <- ss *> char '(' *> (arguments `sepBy` (char ','))
+      ret    <- ss *> char ')' *> returnType
+      _      <- ss
+      return $ PGFunction (unpack schema) (unpack name) args ret
 
-  arguments = do
-    name     <- ss *> identifier
-    datatype <- ss *> postgresType
-    def      <- ss *> ((asciiCI "default" <|> string "=") *> (takeTill (inClass ",)")) <|> (string ""))
-    -- WARNING: parsing default values requires ability to parse almost arbitraty expressions.
-    -- Here is a quick and dirty implementation of the parser.
+    arguments = do
+      name     <- ss *> identifier
+      datatype <- ss *> postgresType
+      def      <- ss *> ((asciiCI "default" <|> string "=") *> (takeTill (inClass ",)"))
+                                                           <|> (string ""))
+      -- WARNING: parsing default values requires ability to parse almost arbitraty expressions.
+      -- Here is a quick and dirty implementation of the parser.
 
-    return $ PGArgument (unpack name) (unpack datatype) ((length def) > 0)
+      return $ PGArgument (unpack name) (unpack datatype) ((length def) > 0)
 
-  cols = do
-    name     <- ss *> identifier
-    datatype <- ss *> postgresType <* ss
-    return $ PGColumn (unpack name) (unpack datatype)
+    cols = do
+      name     <- ss *> identifier
+      datatype <- ss *> postgresType <* ss
+      return $ PGColumn (unpack name) (unpack datatype)
 
-  returnType = do
-    ret <- ss *> asciiCI "returns" *> ss *> (
-               asciiCI "setof"
-           <|> asciiCI "table"
-           <|> postgresType)
+    returnType = do
+      ret <- ss *> asciiCI "returns" *> ss *> (
+                 asciiCI "setof"
+             <|> asciiCI "table"
+             <|> postgresType)
 
-    case toLower(ret) of
-      "setof" -> (PGSetOf . unpack) <$> (ss *> postgresType)
-      "table" -> PGTable <$> (ss *> char '(' *> cols `sepBy` (char ',') <* ss <* char ')')
-      t       -> return $ PGSingle (unpack t)
+      case toLower(ret) of
+        "setof" -> (PGSetOf . unpack) <$> (ss *> postgresType)
+        "table" -> PGTable <$> (ss *> char '(' *> cols `sepBy` (char ',') <* ss <* char ')')
+        t       -> return $ PGSingle (unpack t)
 
-  identifier = do
-    s1 <- takeWhile1 (inClass "a-zA-Z_")
-    s2 <- takeWhile (inClass "a-zA-Z_0-9$")
-    return $ toLower $ s1 `append` s2
+    identifier = do
+      s1 <- takeWhile1 (inClass "a-zA-Z_")
+      s2 <- takeWhile (inClass "a-zA-Z_0-9$")
+      return $ toLower $ s1 `append` s2
 
-  postgresType = toLower <$> (foldr1 (<|>) $
-       (map asciiCI [ "double precision" ])
-    ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 1))) ["bit", "character varying"])
-    ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 2))) ["numeric", "decimal"])
-    ++ (map timeType ["timestamp", "time"])
-    ++ [intervalType, identifier <* (modifiers Nothing)])
+    postgresType = toLower <$> (foldr1 (<|>) $
+         (map asciiCI [ "double precision" ])
+      ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 1))) ["bit", "character varying"])
+      ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 2))) ["numeric", "decimal"])
+      ++ (map timeType ["timestamp", "time"])
+      ++ [intervalType, identifier <* (modifiers Nothing)])
 
-  timeType t = do
-    base <- asciiCI t <* ss <* (modifiers $ Just 1)
-    tz <- ss *> ((asciiCI "with time zone") <|> (asciiCI "without time zone") <|> (string ""))
-    return $ case tz of
-      "" -> base
-      _  -> base `append` " " `append` tz
+    timeType t = do
+      base <- asciiCI t <* ss <* (modifiers $ Just 1)
+      tz <- ss *> ((asciiCI "with time zone") <|> (asciiCI "without time zone") <|> (string ""))
+      return $ case tz of
+        "" -> base
+        _  -> base `append` " " `append` tz
 
-  intervalType = do
-    base <- (asciiCI "interval") <* ss
-    fields <- foldr1 (<|>) $ map asciiCI [
-        "year to month"
-      , "day to hour"
-      , "day to minute"
-      , "day to second"
-      , "hour to minute"
-      , "hour to second"
-      , "minute to second"
-      , "year"
-      , "month"
-      , "day"
-      , "hour"
-      , "minute"
-      , "second"
-      , ""]
-    _ <- ss *> (modifiers $ Just 1)
+    intervalType = do
+      base <- (asciiCI "interval") <* ss
+      fields <- foldr1 (<|>) $ map asciiCI [
+          "year to month"
+        , "day to hour"
+        , "day to minute"
+        , "day to second"
+        , "hour to minute"
+        , "hour to second"
+        , "minute to second"
+        , "year"
+        , "month"
+        , "day"
+        , "hour"
+        , "minute"
+        , "second"
+        , ""]
+      _ <- ss *> (modifiers $ Just 1)
 
-    return $ case fields of
-      "" -> base
-      _  -> base `append` " " `append` fields
+      return $ case fields of
+        "" -> base
+        _  -> base `append` " " `append` fields
 
 
-  modifiers limit = (char '(') *> exact <* (char ')') <|> less where
-    exact = ($ limit) $ maybe
-      ((modifier `sepBy` (char ',')) *> (string ""))
-      (\n -> foldl1 ((*>) . (*> ((char ',') *> ss))) (replicate n modifier) *> string "")
+    modifiers limit = (char '(') *> exact <* (char ')') <|> less where
+      exact = ($ limit) $ maybe
+        ((modifier `sepBy` (char ',')) *> (string ""))
+        (\n -> foldl1 ((*>) . (*> ((char ',') *> ss))) (replicate n modifier) *> string "")
 
-    less = ($ limit) $ maybe
-      (string "")
-      (\n -> case n of
-          1 -> (string "")
-          _ -> (modifiers $ Just (n - 1)))
+      less = ($ limit) $ maybe
+        (string "")
+        (\n -> case n of
+            1 -> (string "")
+            _ -> (modifiers $ Just (n - 1)))
 
-  modifier = (decimal :: Parser Int) *> ss
+    modifier = (decimal :: Parser Int) *> ss

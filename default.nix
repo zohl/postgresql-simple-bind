@@ -1,14 +1,14 @@
 { mkDerivation, attoparsec, base, bytestring, case-conversion
-, data-default, heredoc, hspec, postgresql-simple, stdenv
-, template-haskell, text, time
+, data-default, exceptions, heredoc, hspec, postgresql-simple
+, stdenv, template-haskell, text, time
 }:
 mkDerivation {
   pname = "postgresql-simple-bind";
   version = "0.1.0.0";
   src = ./.;
   libraryHaskellDepends = [
-    attoparsec base bytestring heredoc postgresql-simple
-    template-haskell text time
+    attoparsec base bytestring data-default exceptions heredoc
+    postgresql-simple template-haskell text time
   ];
   testHaskellDepends = [
     attoparsec base bytestring case-conversion data-default hspec

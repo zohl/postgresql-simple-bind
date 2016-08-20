@@ -30,7 +30,6 @@ module Database.PostgreSQL.Simple.Bind.Common (
   , PostgresBindOptions(..)
   ) where
 
-
 import Data.Default (Default, def)
 import Database.PostgreSQL.Simple (Only(..))
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
