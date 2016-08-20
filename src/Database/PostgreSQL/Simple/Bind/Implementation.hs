@@ -17,7 +17,7 @@
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Implementation
   Copyright:   (c) 2016 Al Zohali
-  License:     GPL3
+  License:     BSD3
   Maintainer:  Al Zohali <zohl@fmap.me>
   Stability:   experimental
 

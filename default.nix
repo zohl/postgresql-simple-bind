@@ -15,5 +15,5 @@ mkDerivation {
     postgresql-simple text
   ];
   description = "A FFI-like bindings for PostgreSQL stored functions";
-  license = stdenv.lib.licenses.gpl3;
+  license = stdenv.lib.licenses.bsd3;
 }

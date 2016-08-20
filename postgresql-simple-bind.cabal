@@ -2,7 +2,7 @@ name:                postgresql-simple-bind
 version:             0.1.0.0
 synopsis:            A FFI-like bindings for PostgreSQL stored functions
 description:         For tutorial see here: https:\/\/github.com\/zohl\/postgresql-simple-bind\/blob\/master\/README.md
-license:             GPL-3
+license:             BSD3
 license-file:        LICENSE
 author:              Al Zohali
 maintainer:          Al Zohali <zohl@fmap.me>

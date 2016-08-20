@@ -1,3 +1,7 @@
+[![License BSD3](https://img.shields.io/badge/license-BSD3-brightgreen.svg)](https://tldrlegal.com/license/bsd-3-clause-license-(revised))
+[![Hackage](https://img.shields.io/hackage/v/postgresql-simple-bind.svg?style=flat)](https://hackage.haskell.org/package/postgresql-simple-bind)
+[![Build Status](https://travis-ci.org/zohl/postgresql-simple-bind.svg?branch=master)](https://travis-ci.org/zohl/postgresql-simple-bind)
+
 # postgresql-simple-bind
 
 ## Description
@@ -9,26 +13,31 @@
   communicates with a database via API hiding the internal structure
   of the latter.
 
+## Status
+The library is quite stable.
+There are no plans to introduce breaking changes into the current API.
+
 ## Example
   Suppose we have the following functions in our database:
 
-  ```
+  ```sql
   function add_num(p_x bigint) returns void
   function get_all_nums() returns setof bigint
   ``` 
 
   In order to use them in a haskell application we write the following code:
 
-  ```
-  import Database.PostgreSQL.Simple.Bind (bindFunction, defaultOptions)
+  ```haskell
+  import Data.Default
+  import Database.PostgreSQL.Simple.Bind (bindFunction, PostgresBindOptions)
   import Database.PostgreSQL.Simple.Bind.Types()
   
-  bindFunction defaultOptions "function add_num(p_x bigint) returns void"
-  bindFunction defaultOptions "function get_all_nums() returns setof bigint"
+  bindFunction (def::PostgresBindOptions) "function add_num(p_x bigint) returns void"
+  bindFunction (def::PostgresBindOptions) "function get_all_nums() returns setof bigint"
   ```
 
   That's it. Now we can stick them wherever we want to:
-  ```
+  ```haskell
   add_many_nums :: Connection -> [Int] -> IO ()
   add_many_nums conn xs = sequence_ $ map (add_num conn) xs
   
@@ -42,9 +51,9 @@
   then this type family provides us the final type.
   For example `add_num` is translated the following way:
 
-  ```
+  ```haskell
   -- original PostgreSQL declaration
-  function add_num(p_x bigint) returns void
+  "function add_num(p_x bigint) returns void"
   
   -- first step
   add_num :: ( PostgresType "bigint" ~ a, ToField a
@@ -55,7 +64,7 @@
   ```
 
   where
-  ```
+  ```haskell
   type instance PostgresType "bigint" = Int
   type instance PostgresType "void"   = ()
   ``` 
@@ -91,17 +100,17 @@
 ## Customization
   There are not so many ways to change behaviour of `bindFunction` (yet).
   In the most cases the only required tweak is renaming stored functions.
-  This can be done by specifying `nameModifier` and `schemaModifier` options.
+  This can be done by specifying `pboFunctionName` option.
   For example if database and application code adhere snake case and camel case
   naming conventions respectively, conversion can be made like this:
 
-  ```
+  ```haskell
   import Text.CaseConversion
-  import Database.PostgreSQL.Simple.Bind (Options(..), defaultOptions)
+  import Database.PostgreSQL.Simple.Bind (PostgresBindOptions(..))
   
-  bindOptions :: Options
-  bindOptions = defaultOptions {
-      nameModifier = convertCase Snake Camel
+  bindOptions :: PostgresBindOptions
+  bindOptions = PostgresBindOptions {
+      pboFunctionName = (\(PGFunction _schema name _args _result) -> convertCase Snake Camel name)
     }
   ```
 
@@ -112,8 +121,8 @@
   preBuild hook: set `build-type` to `Custom` in .cabal-file and define
   `main` in Setup.hs like this
 
-  ```
-  import Database.PostgreSQL.Simple.Bind.Util (generateBindingsModule)
+  ```haskell
+  import Database.PostgreSQL.Simple.Bind.Utils (generateBindingsModule)
    
   main :: IO ()
   main = defaultMainWithHooks $ simpleUserHooks { preBuild = mkBindings }
@@ -122,7 +131,7 @@
   mkBindings args buildFlags = do
     conn <- connect connectInfo
     (generateBindingsModule conn
-       "Database.PostgreSQL.Simple.Bind.defaultOptions" "Bindings" [
+       "Your.Module.customBindOptions" "Bindings" [
             "stored_function_1"
           , "stored_function_2"
           -- ...
