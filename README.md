@@ -1,8 +1,7 @@
+# postgresql-simple-bind
 [![License BSD3](https://img.shields.io/badge/license-BSD3-brightgreen.svg)](https://tldrlegal.com/license/bsd-3-clause-license-(revised))
 [![Hackage](https://img.shields.io/hackage/v/postgresql-simple-bind.svg?style=flat)](https://hackage.haskell.org/package/postgresql-simple-bind)
 [![Build Status](https://travis-ci.org/zohl/postgresql-simple-bind.svg?branch=master)](https://travis-ci.org/zohl/postgresql-simple-bind)
-
-# postgresql-simple-bind
 
 ## Description
   A FFI-like bindings for PostgreSQL strored functions.
