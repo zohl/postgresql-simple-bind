@@ -1,3 +1,6 @@
+{-# LANGUAGE CPP #-}
+
+#ifdef DBTests
 import Common (withDB, withRollback)
 import Data.Text ()
 import Database.PostgreSQL.Simple (Connection, ConnectInfo(..))
@@ -24,3 +27,7 @@ spec conn = mapM_ ($ conn) [
   , specUsers
   , specMessages
   ]
+#else
+main :: IO ()
+main = return ()
+#endif

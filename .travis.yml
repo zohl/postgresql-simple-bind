@@ -40,10 +40,7 @@ before_script:
   - psql -U postgres -c "create role test_role with password 'TEST' login;"
 
 script:
-  - case "$CABALVER" in
-     "1.18") cabal configure --enable-tests --enable-library-coverage -v2 -f dev ;;
-     *)      cabal configure --enable-tests --enable-coverage -v2 -f dev ;;
-    esac
+  - cabal configure --enable-tests --enable-coverage -v2 -f dev -f db-tests -f -older-call-syntax
   - cabal build
   - cabal test --show-details=always
   - cabal sdist

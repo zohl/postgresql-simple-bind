@@ -13,6 +13,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE CPP                        #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Implementation
@@ -67,7 +68,13 @@ instance ToField Argument where
 
 formatArgument :: Argument -> Maybe String
 formatArgument (MandatoryArg _name _value)      = Just "?"
-formatArgument (OptionalArg name (Just _value)) = Just $ name ++ " := ?"
+formatArgument (OptionalArg name (Just _value)) = Just $ name ++
+#ifdef OlderCallSyntax
+  " := ?"
+#else
+  " => ?"
+#endif
+
 formatArgument (OptionalArg _name Nothing)      = Nothing
 
 formatArguments :: [Argument] -> String

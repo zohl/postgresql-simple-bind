@@ -1,6 +1,6 @@
 name:                postgresql-simple-bind
-version:             0.2.0.0
-synopsis:            A FFI-like bindings for PostgreSQL stored functions
+version:             0.2.1.0
+synopsis:            FFI-like bindings for PostgreSQL stored functions
 description:         For tutorial see here: https:\/\/github.com\/zohl\/postgresql-simple-bind\/blob\/master\/README.md
 license:             BSD3
 license-file:        LICENSE
@@ -13,9 +13,20 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 flag dev
-  description:        Turn on development settings.
-  manual:             True
-  default:            False
+  description: Turn on development settings.
+  manual:      True
+  default:     False
+
+flag db-tests
+  description: Turn on tests with database.
+  manual:      False
+  default:     False
+
+flag older-call-syntax
+  description: Turn on usage of (:=) in queries instead of (=>). This
+               is necessary for PostgreSQL < 9.5.
+  manual:      True
+  default:     True
 
 source-repository head
   type:     git
@@ -50,6 +61,9 @@ library
     ghc-options:      -Wall -Werror
   else
     ghc-options:      -O2 -Wall
+
+  if flag(older-call-syntax)
+    cpp-options: -DOlderCallSyntax
 
 
 test-suite tests
@@ -99,3 +113,6 @@ test-suite examples
     ghc-options:      -Wall -Wno-redundant-constraints -Werror
   else
     ghc-options:      -O2 -Wall -Wno-redundant-constraints
+
+  if flag(db-tests)
+    cpp-options: -DDBTests

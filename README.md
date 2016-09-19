@@ -4,7 +4,7 @@
 [![Build Status](https://travis-ci.org/zohl/postgresql-simple-bind.svg?branch=master)](https://travis-ci.org/zohl/postgresql-simple-bind)
 
 ## Description
-  A FFI-like bindings for PostgreSQL strored functions.
+  FFI-like bindings for PostgreSQL strored functions.
   
   `postgresql-simple-bind` is an extension for `postgresql-simple`
   library that faciliates and automates bindings creation. This is
