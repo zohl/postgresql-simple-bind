@@ -7,6 +7,7 @@ module Common (
 
 import Data.Default (def)
 import Control.Exception.Base (bracket)
+import Control.Monad (void)
 import Database.PostgreSQL.Simple (Connection, ConnectInfo, connect, begin, rollback, close, execute_)
 import Database.PostgreSQL.Simple.Bind (PostgresBindOptions(..), PGFunction(..))
 import Database.PostgreSQL.Simple.Types (Query(..))
@@ -29,4 +30,4 @@ withRollback :: (Connection -> IO ()) -> (Connection -> IO ())
 withRollback action = \conn -> mapM_ ($ conn) [begin, action, rollback]
 
 include :: Connection -> String -> IO ()
-include conn fn = readFile fn >>= (execute_ conn . Query . BS.pack) >> return ()
+include conn fn = void $ BS.readFile fn >>= (execute_ conn . Query)

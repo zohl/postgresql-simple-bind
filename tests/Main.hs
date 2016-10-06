@@ -117,6 +117,9 @@ spec = do
       (parsePGFunction "function f(x timestamp with time zone) returns void") >>= shouldBe
         (PGFunction "" "f" [PGArgument "x" "timestamp with time zone" False] (PGSingle "void"))
 
+      (parsePGFunction "function f(x timestamptz) returns void") >>= shouldBe
+        (PGFunction "" "f" [PGArgument "x" "timestamptz" False] (PGSingle "void"))
+
 
     it "works for intervals" $ do
       (parsePGFunction "function f(x interval) returns void") >>= shouldBe

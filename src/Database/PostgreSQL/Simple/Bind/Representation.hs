@@ -121,7 +121,7 @@ parsePGFunction s = either
          (map asciiCI [ "double precision" ])
       ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 1))) ["bit", "character varying"])
       ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 2))) ["numeric", "decimal"])
-      ++ (map timeType ["timestamp", "time"])
+      ++ ((asciiCI "timestamptz"):(map timeType ["timestamp", "time"]))
       ++ [intervalType, identifier <* (modifiers Nothing)])
 
     timeType t = do
