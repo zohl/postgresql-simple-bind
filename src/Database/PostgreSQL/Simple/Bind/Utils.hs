@@ -34,26 +34,25 @@ import Control.Arrow ((***))
 import Data.List (intersperse)
 import Database.PostgreSQL.Simple (Connection, Only(..), query)
 import Database.PostgreSQL.Simple.Bind.Common (unwrapColumn)
-import Database.PostgreSQL.Simple.Types (Query(..))
 import Text.Heredoc (str)
-import qualified Data.ByteString.Char8 as BS
+import Database.PostgreSQL.Simple.SqlQQ (sql)
 import qualified Data.Text as T
 
 -- | Fetch function declaration(s) from database.
 getFunctionDeclaration :: Connection -> String -> IO [String]
-getFunctionDeclaration conn name = unwrapColumn <$> query conn sql (Only $ T.pack name) where
-  sql = Query $ BS.pack $ [str|
-      | select 'function '
-      |     || p.proname
-      |     || '('||pg_catalog.pg_get_function_arguments(p.oid)||')'
-      |     || ' returns '||pg_catalog.pg_get_function_result(p.oid)
-      | from pg_catalog.pg_proc p
-      |      left join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-      | where p.proname ~ ('^('|| ? ||')$')
-      |   and not p.proisagg
-      |   and not p.proiswindow
-      |   and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
-      |]
+getFunctionDeclaration conn name = unwrapColumn <$> query conn sql' (Only $ T.pack name) where
+  sql' = [sql|
+      select 'function '
+          || p.proname
+          || '('||pg_catalog.pg_get_function_arguments(p.oid)||')'
+          || ' returns '||pg_catalog.pg_get_function_result(p.oid)
+      from pg_catalog.pg_proc p
+           left join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+      where p.proname ~ ('^('|| ? ||')$')
+        and not p.proisagg
+        and not p.proiswindow
+        and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
+    |]
 
 
 -- | Generate module with bindings.
