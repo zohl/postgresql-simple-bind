@@ -74,7 +74,7 @@ instance FromField User where
 
          value :: Parser (Conversion User)
          value = do
-           [Just userId, Just userName, Just userAge] <- row 
+           [Just userId, Just userName, Just userAge] <- row
            return $ User <$> (fromField1 userId) <*> (fromField1 userName) <*> (fromField1 userAge)
 
          row :: Parser [Maybe BS.ByteString]
@@ -89,16 +89,20 @@ instance FromField User where
                | c == ',' || c == ')' -> Nothing
                | otherwise            -> fail $ "Unexpected symbol: " ++ [c]
 
-             unescape = unescape' b0 . groupByQuotes . BSC8.init where
-               b0 = byteString BS.empty
-               groupByQuotes = BSC8.groupBy $ \a b -> (a == '"') == (b == '"')
+             unescape = halve '\\' b0 . groupByChar '\\'
+                      . halve '"' b0  . groupByChar '"'
+                      . BSC8.init where
 
-               unescape' :: Builder -> [BS.ByteString] -> BS.ByteString
-               unescape' b []     = BSL.toStrict . toLazyByteString $ b
-               unescape' b (s:ss) = unescape' (b <> b') ss where
+               b0 = byteString BS.empty
+
+               groupByChar c = BSC8.groupBy $ \a b -> (a == c) == (b == c)
+
+               halve :: Char -> Builder -> [BS.ByteString] -> BS.ByteString
+               halve c b []     = BSL.toStrict . toLazyByteString $ b
+               halve c b (s:ss) = unescape' (b <> b') ss where
                  b' = if
-                   | (/= '"') . BSC8.head $ s -> byteString s
-                   | otherwise                -> byteString . BS.take ((BS.length s) `div` 2) $ s
+                   | (/= c) . BSC8.head $ s -> byteString s
+                   | otherwise              -> byteString . BS.take ((BS.length s) `div` 2) $ s
 
            unquotedString = takeWhile1 (\c -> c /= ',' && c /= ')')
 
