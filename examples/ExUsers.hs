@@ -98,7 +98,7 @@ instance FromField User where
                groupByChar c = BSC8.groupBy $ \a b -> (a == c) == (b == c)
 
                halve :: Char -> Builder -> [BS.ByteString] -> BS.ByteString
-               halve c b []     = BSL.toStrict . toLazyByteString $ b
+               halve _ b []     = BSL.toStrict . toLazyByteString $ b
                halve c b (s:ss) = halve c (b <> b') ss where
                  b' = if
                    | (/= c) . BSC8.head $ s -> byteString s
