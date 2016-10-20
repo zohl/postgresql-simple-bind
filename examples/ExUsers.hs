@@ -99,7 +99,7 @@ instance FromField User where
 
                halve :: Char -> Builder -> [BS.ByteString] -> BS.ByteString
                halve c b []     = BSL.toStrict . toLazyByteString $ b
-               halve c b (s:ss) = unescape' (b <> b') ss where
+               halve c b (s:ss) = halve c (b <> b') ss where
                  b' = if
                    | (/= c) . BSC8.head $ s -> byteString s
                    | otherwise              -> byteString . BS.take ((BS.length s) `div` 2) $ s
