@@ -39,7 +39,7 @@ import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, query, query_)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..))
 import Database.PostgreSQL.Simple.Bind.Representation (parsePGFunction, PostgresBindException(..))
-import Database.PostgreSQL.Simple.Bind.Common (unwrapRow, unwrapColumn, PostgresBindOptions(..))
+import Database.PostgreSQL.Simple.Bind.Common (unwrapRow, unwrapColumn, PostgresBindOptions(..), NullableColumns(..))
 import Database.PostgreSQL.Simple.FromField (FromField)
 import Database.PostgreSQL.Simple.ToField (ToField(..))
 import Database.PostgreSQL.Simple.Types (Query(..))
@@ -87,15 +87,29 @@ filterArguments = filter isPresented where
   isPresented _                           = True
 
 
+isNullable :: NullableColumns -> String -> PGColumn -> Bool
+isNullable (SpecificColumns tbls) table (PGColumn name _) = maybe
+  False
+  (elem name)
+  (lookup table tbls)
+
+isNullable AllColumns _ _ = True
+isNullable NoColumns  _ _ = False
+
+
 -- | Example: "varchar" -> PostgresType "varchar"
 postgresT :: String -> Type
 postgresT t = AppT (ConT ''PostgresType) (LitT (StrTyLit t))
 
--- | Example: "varchar" FromField a -> [PostgresType "varchar" ~ a, FromField a]
-mkContextT :: Name -> String -> Name -> [Type]
-mkContextT c t n = [
-    EqualityT `AppT` (postgresT t) `AppT` (VarT n)
-  , (ConT c) `AppT` (VarT n)] where
+-- | Example: ''FromField "varchar" True a -> [PostgresType "varchar" ~ a, FromField (Maybe a)]
+mkContextT :: Name -> String -> Bool -> Name -> [Type]
+mkContextT constraint typelit nullable name = [
+    EqualityT `AppT` (postgresT typelit) `AppT` (VarT name)
+  , (ConT constraint) `AppT` result
+  ] where
+    result = case nullable of
+      False -> VarT name
+      True  -> (ConT ''Maybe) `AppT` (VarT name)
 
 -- | Examples:
 --     (PGSingle "varchar") -> (["y"], [PostgresType "varchar" ~ y, FromField y], y)
@@ -104,18 +118,23 @@ mkContextT c t n = [
 --         ["y", "z"]
 --       , [PostgresType "bigint" ~ y, FromField y, PostgresType "varchar" ~ z, FromField z]
 --       , (y, z))
-mkResultT :: PGResult -> Q ([Name], [Type], Type)
-mkResultT (PGSingle t) = do
+mkResultT :: PostgresBindOptions -> String -> PGResult -> Q ([Name], [Type], Type)
+mkResultT _ _ (PGSingle t) = do
   name <- newName "y"
-  return ([name], mkContextT ''FromField t name, VarT name)
+  return ([name], mkContextT ''FromField t False name, VarT name)
 
-mkResultT (PGSetOf t) = do
-  (names, context, clause) <- mkResultT (PGSingle t)
+mkResultT opt fname (PGSetOf t) = do
+  (names, context, clause) <- mkResultT opt fname (PGSingle t)
   return (names, context, AppT ListT clause)
 
-mkResultT (PGTable cs) = do
+mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
   names <- sequence $ replicate (length cs) (newName "y")
-  let context = concat $ zipWith (\(PGColumn _ t) n -> mkContextT ''FromField t n) cs names
+  let context = concat $ zipWith3
+        (\(PGColumn _ typelit) name nullable -> mkContextT ''FromField typelit nullable name)
+        cs
+        names
+        (map (isNullable pboNullableColumns fname) cs)
+
   let clause = AppT ListT $ foldl AppT (TupleT (length cs)) $ map VarT names
   return (names, context, clause)
 
@@ -126,7 +145,7 @@ mkResultT (PGTable cs) = do
 mkArgsT :: [PGArgument] -> Q ([Name], [Type], [Type])
 mkArgsT cs = do
   names <- sequence $ replicate (length cs) (newName "x")
-  let context = concat $ zipWith (\(PGArgument _ t _) n -> mkContextT ''ToField t n) cs names
+  let context = concat $ zipWith (\(PGArgument _ t _) n -> mkContextT ''ToField t False n) cs names
 
   let defWrap d = case d of
         True  -> AppT (ConT ''Maybe)
@@ -142,9 +161,9 @@ mkArgsT cs = do
 --           , PostgresType "bigint" ~ x2, ToField x2
 --           , PostgresType "varchar" ~ x2, FromField x3) => Connection -> x1 -> Maybe x2 -> x3}
 mkFunctionT :: PostgresBindOptions -> PGFunction -> Q Dec
-mkFunctionT (PostgresBindOptions {..}) f@(PGFunction _schema _name args ret) = do
+mkFunctionT opt@(PostgresBindOptions {..}) f@(PGFunction _schema fname args ret) = do
   (argNames, argContext, argClause) <- mkArgsT args
-  (retNames, retContext, retClause) <- mkResultT ret
+  (retNames, retContext, retClause) <- mkResultT opt fname ret
 
   let vars = map PlainTV (argNames ++ retNames)
   let context = argContext ++ retContext

@@ -28,6 +28,7 @@ module Database.PostgreSQL.Simple.Bind.Common (
     unwrapRow
   , unwrapColumn
   , PostgresBindOptions(..)
+  , NullableColumns(..)
   ) where
 
 import Data.Default (Default, def)
@@ -35,15 +36,22 @@ import Database.PostgreSQL.Simple (Only(..))
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
 
 
+data NullableColumns
+    = AllColumns
+    | NoColumns
+    | SpecificColumns [(String, [String])]
+
 -- | Options that specify how to construct the function binding.
-data PostgresBindOptions = PostgresBindOptions
-  { pboFunctionName :: PGFunction -> String
-    -- ^ Function that generates name of a binding
+data PostgresBindOptions = PostgresBindOptions {
+    pboFunctionName    :: PGFunction -> String -- ^ Function that generates name of a binding
+  , pboNullableColumns :: NullableColumns
   }
 
 instance Default PostgresBindOptions where
-  def = PostgresBindOptions
-    { pboFunctionName = \(PGFunction _schema name _args _result) -> name }
+  def = PostgresBindOptions {
+      pboFunctionName = \(PGFunction _schema name _args _result) -> name
+    , pboNullableColumns = NoColumns
+    }
 
 -- | Remove 'Only' constructor.
 unwrapColumn :: [Only a] -> [a]
