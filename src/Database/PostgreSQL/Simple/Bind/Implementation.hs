@@ -39,9 +39,10 @@ import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, query, query_)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..))
 import Database.PostgreSQL.Simple.Bind.Representation (parsePGFunction, PostgresBindException(..))
-import Database.PostgreSQL.Simple.Bind.Common (unwrapRow, unwrapColumn, PostgresBindOptions(..), NullableColumns(..))
+import Database.PostgreSQL.Simple.Bind.Common (unwrapRow, unwrapColumn, PostgresBindOptions(..), ReturnType(..))
 import Database.PostgreSQL.Simple.FromField (FromField)
 import Database.PostgreSQL.Simple.ToField (ToField(..))
+import Database.PostgreSQL.Simple.FromRow (FromRow(..))
 import Database.PostgreSQL.Simple.Types (Query(..))
 import GHC.TypeLits (Symbol)
 import Language.Haskell.TH.Syntax (Q, Dec(..), Exp(..), Type(..), Clause(..), Body(..), Pat(..))
@@ -87,16 +88,6 @@ filterArguments = filter isPresented where
   isPresented _                           = True
 
 
-isNullable :: NullableColumns -> String -> PGColumn -> Bool
-isNullable (SpecificColumns tbls) table (PGColumn name _) = maybe
-  False
-  (elem name)
-  (lookup table tbls)
-
-isNullable AllColumns _ _ = True
-isNullable NoColumns  _ _ = False
-
-
 -- | Example: "varchar" -> PostgresType "varchar"
 postgresT :: String -> Type
 postgresT t = AppT (ConT ''PostgresType) (LitT (StrTyLit t))
@@ -123,9 +114,12 @@ mkResultT _ _ (PGSingle t) = do
   name <- newName "y"
   return ([name], mkContextT ''FromField t False name, VarT name)
 
-mkResultT opt fname (PGSetOf t) = do
-  (names, context, clause) <- mkResultT opt fname (PGSingle t)
-  return (names, context, AppT ListT clause)
+mkResultT (PostgresBindOptions {..}) _fname (PGSetOf tname) = do
+  name <- newName "y"
+  let constraint = case (pboSetOfReturnType tname) of
+        AsRow   -> ''FromRow
+        AsField -> ''FromField
+  return ([name], mkContextT constraint tname False name, ListT `AppT` (VarT name))
 
 mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
   names <- sequence $ replicate (length cs) (newName "y")
@@ -133,7 +127,7 @@ mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
         (\(PGColumn _ typelit) name nullable -> mkContextT ''FromField typelit nullable name)
         cs
         names
-        (map (isNullable pboNullableColumns fname) cs)
+        (map (pboIsNullable fname . (\(PGColumn _name ctype) -> ctype)) cs)
 
   let clause = AppT ListT $ foldl AppT (TupleT (length cs)) $ map VarT names
   return (names, context, clause)
@@ -178,31 +172,40 @@ mkFunctionT opt@(PostgresBindOptions {..}) f@(PGFunction _schema fname args ret)
 --     (PGFunction "public" "foo"
 --       [PGArgument "x" "varchar" True, PGArgument "y" "bigint" False] (PGSingle "varchar"))
 --     args -> { Query $ BS.pack $ concat ["select public.foo (", (formatArguments args), ")"] }
-mkSqlQuery :: PGFunction -> Maybe Name -> Exp
-mkSqlQuery (PGFunction schema name _args ret) argsName = toQuery $ AppE (VarE 'concat) $ ListE [
-      mkStrLit $ concat [prefix, " ", functionName, "("]
+mkSqlQuery :: PostgresBindOptions -> PGFunction -> Maybe Name -> Exp
+mkSqlQuery opt (PGFunction schema fname _args ret) argsName = toQuery $ AppE (VarE 'concat) $ ListE [
+      mkStrLit $ concat [prefix opt, " ", functionName, "("]
     , maybe (mkStrLit "") (\args -> (VarE 'formatArguments) `AppE` (VarE args)) argsName
     , mkStrLit ")"] where
 
-  prefix = case ret of
-    PGTable _ -> "select * from"
-    _         -> "select"
+  prefix (PostgresBindOptions {..}) = case ret of
+    PGTable _     -> mkSelect AsRow
+    PGSetOf tname -> mkSelect $ pboSetOfReturnType tname
+    _             -> mkSelect AsField
+
+  mkSelect AsRow   = "select * from"
+  mkSelect AsField = "select"
 
   functionName = case schema of
-    "" -> name
-    _  -> schema ++ "." ++ name
+    "" -> fname
+    _  -> schema ++ "." ++ fname
 
   mkStrLit s = LitE (StringL s)
   toQuery = AppE (ConE 'Query) . AppE (VarE 'BS.pack)
+
+
+unwrapE' :: ReturnType -> Exp -> Exp
+unwrapE' AsRow   q = q
+unwrapE' AsField q = (VarE 'fmap) `AppE` (VarE 'unwrapColumn) `AppE` q
 
 -- | Examples:
 --     (PGSingle _) q -> { unwrapRow  q }
 --     (PGSetOf  _) q -> { unwrapColumn q }
 --     (PGTable  _) q -> { q }
-unwrapE :: PGResult -> Exp -> Exp
-unwrapE (PGSingle _) q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
-unwrapE (PGSetOf _) q = (VarE 'fmap) `AppE` (VarE 'unwrapColumn) `AppE` q
-unwrapE (PGTable _) q = q
+unwrapE :: PostgresBindOptions -> PGResult -> Exp -> Exp
+unwrapE _   (PGSingle _)    q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
+unwrapE opt (PGSetOf tname) q = unwrapE' (pboSetOfReturnType opt tname) q
+unwrapE _   (PGTable _)     q = unwrapE' AsRow q
 
 -- | Example: (PGFunction "public" "foo"
 --     [PGArgument "x" "varchar" True, PGArgument "y" "bigint" False] (PGSingle "varchar")) -> {
@@ -210,7 +213,7 @@ unwrapE (PGTable _) q = q
 --         (Query $ BS.pack $ concat ["select public.foo (", (formatArguments args), ")"])
 --         (filterArguments [MandatoryArg "x1" x1, OptionalArg "x2" x2])
 mkFunctionE :: PostgresBindOptions -> PGFunction -> Q Dec
-mkFunctionE (PostgresBindOptions {..}) f@(PGFunction _schema _name args ret) = do
+mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction _schema _fname args ret) = do
   names <- sequence $ replicate (length args) (newName "x")
   connName <- newName "conn"
 
@@ -226,11 +229,13 @@ mkFunctionE (PostgresBindOptions {..}) f@(PGFunction _schema _name args ret) = d
 
   let funcName = mkName $ pboFunctionName f
   let funcArgs = (VarP connName):(map VarP names)
-  let funcBody = NormalB $ unwrapE ret $ foldl1 AppE $ [
+  let funcBody = NormalB $ unwrapE opt ret $ foldl1 AppE $ [
           VarE $ maybe 'query_ (const 'query) argsName
         , VarE connName
-        , mkSqlQuery f argsName
+        , mkSqlQuery opt f argsName
         ] ++ (const argsExpr <$> maybeToList argsName)
 
   let decl = (\name -> ValD (VarP name) (NormalB argsExpr) []) <$> maybeToList argsName
   return $ FunD funcName [Clause funcArgs funcBody decl]
+
+

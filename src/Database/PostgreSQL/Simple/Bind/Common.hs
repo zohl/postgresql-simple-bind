@@ -28,7 +28,7 @@ module Database.PostgreSQL.Simple.Bind.Common (
     unwrapRow
   , unwrapColumn
   , PostgresBindOptions(..)
-  , NullableColumns(..)
+  , ReturnType(..)
   ) where
 
 import Data.Default (Default, def)
@@ -36,21 +36,22 @@ import Database.PostgreSQL.Simple (Only(..))
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
 
 
-data NullableColumns
-    = AllColumns
-    | NoColumns
-    | SpecificColumns [(String, [String])]
+data ReturnType
+    = AsRow
+    | AsField
 
 -- | Options that specify how to construct the function binding.
 data PostgresBindOptions = PostgresBindOptions {
-    pboFunctionName    :: PGFunction -> String -- ^ Function that generates name of a binding
-  , pboNullableColumns :: NullableColumns
+    pboFunctionName    :: PGFunction -> String     -- ^ Function that generates name of a binding.
+  , pboIsNullable      :: String -> String -> Bool -- ^ Which columns in returned tables can be null.
+  , pboSetOfReturnType :: String -> ReturnType     -- ^ How to process type in "setof" clause.
   }
 
 instance Default PostgresBindOptions where
   def = PostgresBindOptions {
-      pboFunctionName = \(PGFunction _schema name _args _result) -> name
-    , pboNullableColumns = NoColumns
+      pboFunctionName    = \(PGFunction _schema name _args _result) -> name
+    , pboIsNullable      = \_fname _column -> False
+    , pboSetOfReturnType = \_tname -> AsField
     }
 
 -- | Remove 'Only' constructor.

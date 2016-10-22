@@ -30,7 +30,6 @@ concat <$> mapM (bindFunction bindOptions) [
   , "function clear() returns void"
   ]
 
-
 addManyNums :: Connection -> [Int] -> IO ()
 addManyNums conn xs = mapM_ (sqlAddNum conn) xs
 

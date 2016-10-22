@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Common (
     withDB
   , withRollback
@@ -9,7 +11,7 @@ import Data.Default (def)
 import Control.Exception.Base (bracket)
 import Control.Monad (void)
 import Database.PostgreSQL.Simple (Connection, ConnectInfo, connect, begin, rollback, close, execute_)
-import Database.PostgreSQL.Simple.Bind (PostgresBindOptions(..), PGFunction(..))
+import Database.PostgreSQL.Simple.Bind (PostgresBindOptions(..), PGFunction(..), ReturnType(..))
 import Database.PostgreSQL.Simple.Types (Query(..))
 import Text.CaseConversion (convertCase, WordCase(..))
 import qualified Data.ByteString.Char8 as BS
@@ -20,7 +22,10 @@ mkFunctionName (PGFunction _schema name _args _result)
 
 bindOptions :: PostgresBindOptions
 bindOptions = (def :: PostgresBindOptions) {
-    pboFunctionName = mkFunctionName
+    pboFunctionName    = mkFunctionName
+  , pboSetOfReturnType = \case
+      "t_user" -> AsRow
+      _        -> AsField
   }
 
 withDB :: ConnectInfo -> (Connection -> IO a) -> IO a

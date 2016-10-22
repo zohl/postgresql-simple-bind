@@ -19,6 +19,7 @@ module Database.PostgreSQL.Simple.Bind (
     bindFunction
 
   , PostgresBindOptions(..)
+  , ReturnType(..)
   , PostgresBindException(..)
   , PostgresType
 
@@ -31,4 +32,4 @@ module Database.PostgreSQL.Simple.Bind (
 
 import Database.PostgreSQL.Simple.Bind.Implementation
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGColumn(..), PGResult(..), PostgresBindException(..))
-import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..))
+import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), ReturnType(..))
