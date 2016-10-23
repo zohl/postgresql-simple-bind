@@ -5,7 +5,7 @@
 
 ## Description
   FFI-like bindings for PostgreSQL strored functions.
-  
+
   `postgresql-simple-bind` is an extension for `postgresql-simple`
   library that faciliates and automates bindings creation. This is
   especially useful in a design pattern where an application
@@ -22,7 +22,7 @@ There are no plans to introduce breaking changes into the current API.
   ```sql
   function add_num(p_x bigint) returns void
   function get_all_nums() returns setof bigint
-  ``` 
+  ```
 
   In order to use them in a haskell application we write the following code:
 
@@ -30,7 +30,7 @@ There are no plans to introduce breaking changes into the current API.
   import Data.Default
   import Database.PostgreSQL.Simple.Bind (bindFunction, PostgresBindOptions)
   import Database.PostgreSQL.Simple.Bind.Types()
-  
+
   bindFunction (def::PostgresBindOptions) "function add_num(p_x bigint) returns void"
   bindFunction (def::PostgresBindOptions) "function get_all_nums() returns setof bigint"
   ```
@@ -39,7 +39,7 @@ There are no plans to introduce breaking changes into the current API.
   ```haskell
   add_many_nums :: Connection -> [Int] -> IO ()
   add_many_nums conn xs = sequence_ $ map (add_num conn) xs
-  
+
   get_sum :: Connection -> IO Int
   get_sum conn = sum <$> (get_all_nums conn)
   ```
@@ -53,11 +53,11 @@ There are no plans to introduce breaking changes into the current API.
   ```haskell
   -- original PostgreSQL declaration
   "function add_num(p_x bigint) returns void"
-  
+
   -- first step
   add_num :: ( PostgresType "bigint" ~ a, ToField a
              , PostgresType "void" ~ b, FromField b) => Connection -> a -> IO b
-  
+
   -- second step
   add_num :: Connection -> Int -> IO ()
   ```
@@ -66,7 +66,7 @@ There are no plans to introduce breaking changes into the current API.
   ```haskell
   type instance PostgresType "bigint" = Int
   type instance PostgresType "void"   = ()
-  ``` 
+  ```
   as they are defined in `Database.PostgreSQL.Simple.Bind.Types`.
 
   What if the provided instances give us unwanted types (e.g. `varchar` is
@@ -89,43 +89,52 @@ There are no plans to introduce breaking changes into the current API.
   and/or `ToRow` instances. This means there is no support for `record` return
   type as it doesn't disclose any information on it's structure.
 
-  Another caveat is about functions returning tables (or sets of composite
-  types). There is no way to put `not null` constraint on the resulting columns,
-  so such function can return result with `null` in any column. At the current
-  moment this behaviour is not supported, so each function returning table is
-  supposed to return non-`null`-values.
 
 
 ## Customization
-  There are not so many ways to change behaviour of `bindFunction` (yet).
+### pboFunctionName
   In the most cases the only required tweak is renaming stored functions.
-  This can be done by specifying `pboFunctionName` option.
   For example if database and application code adhere snake case and camel case
   naming conventions respectively, conversion can be made like this:
 
   ```haskell
   import Text.CaseConversion
-  import Database.PostgreSQL.Simple.Bind (PostgresBindOptions(..))
-  
+  import Database.PostgreSQL.Simple.Bind
+
   bindOptions :: PostgresBindOptions
   bindOptions = PostgresBindOptions {
       pboFunctionName = (\(PGFunction _schema name _args _result) -> convertCase Snake Camel name)
     }
   ```
 
+### pboIsNullable
+  PostgreSQL doesn't allow to specify constraints like `not null` on
+  columns in functions returning tables. Therefore values returned
+  from such functions can be nulls. By default the binding procedure
+  assumes that all values aren't nulls, but this can be changed using
+  this option. The first argument is a postgres function name and the
+  second one is a column name.
+
+### pboSetOfReturnType
+  Basically this option allows to choose which instances to
+  use: `FromRow` or `FromField` per type. `postgresql-simple` provides
+  generics for `FromRow` and `ToRow` instances, so sometimes it's
+  easier to employ this mechanism rather than write a parser from
+  scratch.
+
 ## Automated generation
   It can be tedious to manually maintain consistent function declarations
   across the codebase. More convenient way is to automatically generate module
-  during the compilation time. In case of cabal it can be done by using 
+  during the compilation time. In case of cabal it can be done by using
   preBuild hook: set `build-type` to `Custom` in .cabal-file and define
   `main` in Setup.hs like this
 
   ```haskell
   import Database.PostgreSQL.Simple.Bind.Utils (generateBindingsModule)
-   
+
   main :: IO ()
   main = defaultMainWithHooks $ simpleUserHooks { preBuild = mkBindings }
-  
+
   mkBindings :: Args -> BuildFlags -> IO HookedBuildInfo
   mkBindings args buildFlags = do
     conn <- connect connectInfo
@@ -141,6 +150,6 @@ There are no plans to introduce breaking changes into the current API.
 
   Every time the build procedure is executed, there will be database
   lookup for function signatures.
-   
-  
+
+
 
