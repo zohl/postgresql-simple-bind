@@ -35,7 +35,7 @@ import Data.Default (Default, def)
 import Database.PostgreSQL.Simple (Only(..))
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
 
-
+-- | How to interpret results of function execution.
 data ReturnType
     = AsRow
     | AsField
