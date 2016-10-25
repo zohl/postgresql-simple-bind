@@ -28,6 +28,11 @@ flag older-call-syntax
   manual:      True
   default:     True
 
+flag debug-queries
+  description: Turn on output of executed queries.
+  manual:      False
+  default:     False
+
 source-repository head
   type:     git
   location: https://github.com/zohl/postgresql-simple-bind.git
@@ -65,6 +70,8 @@ library
   if flag(older-call-syntax)
     cpp-options: -DOlderCallSyntax
 
+  if flag(debug-queries)
+    cpp-options: -DDebugQueries
 
 test-suite tests
   type:           exitcode-stdio-1.0

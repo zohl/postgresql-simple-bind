@@ -33,6 +33,11 @@ module Database.PostgreSQL.Simple.Bind.Implementation (
   ) where
 
 import Control.Exception (throw)
+
+#ifdef DebugQueries
+import Debug.Trace (traceId, traceShowId)
+#endif
+
 import Data.List (intersperse)
 import Data.Maybe (catMaybes, maybeToList)
 import Data.Text (Text)
@@ -59,8 +64,17 @@ bindFunction opt s = parsePGFunction s >>= mkFunction opt
 mkFunction :: PostgresBindOptions -> PGFunction -> Q [Dec]
 mkFunction opt f = sequence $ (($ f) . ($ opt)) <$> [mkFunctionT, mkFunctionE]
 
+#ifdef DebugQueries
+data Argument = forall a . (Show a, ToField a) => MandatoryArg String a
+              | forall a . (Show a, ToField a) => OptionalArg String (Maybe a)
+
+instance Show Argument where
+  show (MandatoryArg name value) = "mandatory: " ++ name ++ " => " ++ show value
+  show (OptionalArg  name value) = "optional: "  ++ name ++ " => " ++ show value
+#else
 data Argument = forall a . (ToField a) => MandatoryArg String a
               | forall a . (ToField a) => OptionalArg String (Maybe a)
+#endif
 
 instance ToField Argument where
   toField (MandatoryArg _ x)         = toField x
@@ -168,12 +182,20 @@ mkFunctionT opt@(PostgresBindOptions {..}) f@(PGFunction _schema fname args ret)
   return $ SigD (mkName $ pboFunctionName f) $ ForallT vars context clause
 
 
+traceIdWrapE :: Exp -> Exp
+#ifdef DebugQueries
+traceIdWrapE q = (VarE 'traceId) `AppE` q
+#else
+traceIdWrapE = id
+#endif
+
 -- | Example:
 --     (PGFunction "public" "foo"
 --       [PGArgument "x" "varchar" True, PGArgument "y" "bigint" False] (PGSingle "varchar"))
 --     args -> { Query $ BS.pack $ concat ["select public.foo (", (formatArguments args), ")"] }
 mkSqlQuery :: PostgresBindOptions -> PGFunction -> Maybe Name -> Exp
-mkSqlQuery opt (PGFunction schema fname _args ret) argsName = toQuery $ AppE (VarE 'concat) $ ListE [
+mkSqlQuery opt (PGFunction schema fname _args ret) argsName =
+  toQuery . traceIdWrapE . AppE (VarE 'concat) . ListE $ [
       mkStrLit $ concat [prefix opt, " ", functionName, "("]
     , maybe (mkStrLit "") (\args -> (VarE 'formatArguments) `AppE` (VarE args)) argsName
     , mkStrLit ")"] where
@@ -207,6 +229,13 @@ unwrapE _   (PGSingle _)    q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
 unwrapE opt (PGSetOf tname) q = unwrapE' (pboSetOfReturnType opt tname) q
 unwrapE _   (PGTable _)     q = unwrapE' AsRow q
 
+traceShowIdWrapE :: Exp -> Exp
+#ifdef DebugQueries
+traceShowIdWrapE q = (VarE 'traceShowId) `AppE` q
+#else
+traceShowIdWrapE = id
+#endif
+
 -- | Example: (PGFunction "public" "foo"
 --     [PGArgument "x" "varchar" True, PGArgument "y" "bigint" False] (PGSingle "varchar")) -> {
 --       foo conn x1 x2 = query conn
@@ -233,9 +262,8 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction _schema _fname args ret
           VarE $ maybe 'query_ (const 'query) argsName
         , VarE connName
         , mkSqlQuery opt f argsName
-        ] ++ (const argsExpr <$> maybeToList argsName)
+        ] ++ (const (traceShowIdWrapE argsExpr) <$> maybeToList argsName)
 
   let decl = (\name -> ValD (VarP name) (NormalB argsExpr) []) <$> maybeToList argsName
   return $ FunD funcName [Clause funcArgs funcBody decl]
-
 
