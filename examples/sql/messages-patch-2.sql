@@ -27,7 +27,7 @@ alter table messages
 , drop column receiver;
 
 
-create or replace function send_message(p_receiver varchar, p_contents varchar) returns bigint as
+create or replace function send_message(p_receiver varchar, p_contents varchar default null) returns bigint as
 $send_message$
   insert into messages(message_id, sender_id, receiver_id, contents)
   values (

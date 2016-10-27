@@ -26,7 +26,12 @@ bindOptions = (def :: PostgresBindOptions) {
   , pboSetOfReturnType = \case
       "t_user" -> AsRow
       _        -> AsField
-  }
+  , pboIsNullable      = isNullable
+  } where
+    isNullable :: String -> String -> Bool
+    isNullable "get_new_messages" "contents" = True
+    isNullable _                  _          = False
+
 
 withDB :: ConnectInfo -> (Connection -> IO a) -> IO a
 withDB connectInfo = bracket (connect connectInfo) close

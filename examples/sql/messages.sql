@@ -8,7 +8,7 @@ create table messages (
 , is_read      boolean  default false
 );
 
-create function send_message(p_receiver varchar, p_contents varchar) returns bigint as
+create function send_message(p_receiver varchar, p_contents varchar default null) returns bigint as
 $send_message$
   insert into messages(message_id, sender, receiver, contents)
   values (

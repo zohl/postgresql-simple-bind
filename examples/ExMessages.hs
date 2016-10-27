@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE DeriveGeneric     #-}
 
 -- Legend:
 --   API for reading and sending messages.
@@ -25,7 +26,7 @@ import Prelude hiding (getContents)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
 concat <$> mapM (bindFunction bindOptions) [
-    "function send_message(p_receiver varchar, p_contents varchar) returns bigint"
+    "function send_message(p_receiver varchar, p_contents varchar default null) returns bigint"
   , "function get_new_messages(p_receiver varchar) returns table (message_id bigint, sender varchar, contents varchar)"
   , "function mark_as_read(p_receiver varchar, p_message_id bigint) returns void"
   ]
@@ -43,9 +44,9 @@ specMessages conn = describe "Messages example" $ it "works" $ mapM_ runTests [
   runTests fn = do
     include conn fn
 
-    msg1 <- sqlSendMessage conn "mr_foo" "hello!"
-    msg2 <- sqlSendMessage conn "mr_bar" "hello!"
-    msg3 <- sqlSendMessage conn "mr_bar" "hello again!"
+    msg1 <- sqlSendMessage conn "mr_foo" (Just "hello!")
+    msg2 <- sqlSendMessage conn "mr_bar" (Just "hello!")
+    msg3 <- sqlSendMessage conn "mr_bar" (Just "hello again!")
 
     sqlGetNewMessages conn "mr_foo" >>= shouldBe [msg1] . map getId
     sqlGetNewMessages conn "mr_bar" >>= shouldBe [msg2, msg3] . map getId
@@ -56,3 +57,5 @@ specMessages conn = describe "Messages example" $ it "works" $ mapM_ runTests [
 
     sqlMarkAsRead conn "mr_foo" msg1
     sqlMarkAsRead conn "mr_bar" msg3
+
+    sqlSendMessage conn "mr_foo" Nothing
