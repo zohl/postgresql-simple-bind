@@ -106,15 +106,12 @@ filterArguments = filter isPresented where
 postgresT :: String -> Type
 postgresT t = AppT (ConT ''PostgresType) (LitT (StrTyLit t))
 
--- | Example: ''FromField "varchar" True a -> [PostgresType "varchar" ~ a, FromField (Maybe a)]
-mkContextT :: Name -> String -> Bool -> Name -> [Type]
-mkContextT constraint typelit nullable name = [
+-- | Example: ''FromField "varchar" a -> [PostgresType "varchar" ~ a, FromField a]
+mkContextT :: Name -> String -> Name -> [Type]
+mkContextT constraint typelit name = [
     EqualityT `AppT` (postgresT typelit) `AppT` (VarT name)
-  , (ConT constraint) `AppT` result
-  ] where
-    result = case nullable of
-      False -> VarT name
-      True  -> (ConT ''Maybe) `AppT` (VarT name)
+  , (ConT constraint) `AppT` VarT name
+  ]
 
 -- | Examples:
 --     (PGSingle "varchar") -> (["y"], [PostgresType "varchar" ~ y, FromField y], y)
@@ -126,24 +123,27 @@ mkContextT constraint typelit nullable name = [
 mkResultT :: PostgresBindOptions -> String -> PGResult -> Q ([Name], [Type], Type)
 mkResultT _ _ (PGSingle t) = do
   name <- newName "y"
-  return ([name], mkContextT ''FromField t False name, VarT name)
+  return ([name], mkContextT ''FromField t name, VarT name)
 
 mkResultT (PostgresBindOptions {..}) _fname (PGSetOf tname) = do
   name <- newName "y"
   let constraint = case (pboSetOfReturnType tname) of
         AsRow   -> ''FromRow
         AsField -> ''FromField
-  return ([name], mkContextT constraint tname False name, ListT `AppT` (VarT name))
+  return ([name], mkContextT constraint tname name, ListT `AppT` (VarT name))
 
 mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
   names <- sequence $ replicate (length cs) (newName "y")
-  let context = concat $ zipWith3
-        (\(PGColumn _ typelit) name nullable -> mkContextT ''FromField typelit nullable name)
-        cs
-        names
-        (map (pboIsNullable fname . (\(PGColumn _name ctype) -> ctype)) cs)
+  let context = concat $
+        zipWith (\(PGColumn _ typelit) name -> mkContextT ''FromField typelit name) cs names
 
-  let clause = AppT ListT $ foldl AppT (TupleT (length cs)) $ map VarT names
+  let wrapColumn (PGColumn cname _ctype) = case pboIsNullable fname cname of
+        True  -> AppT (ConT ''Maybe)
+        False -> id
+
+  let clause = AppT ListT $ foldl AppT (TupleT (length cs)) $
+        zipWith wrapColumn cs (map VarT names)
+
   return (names, context, clause)
 
 -- | Example: [PGArgument "x" "varchar" True, PGArgument "y" "bigint" False] -> (
@@ -153,7 +153,7 @@ mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
 mkArgsT :: [PGArgument] -> Q ([Name], [Type], [Type])
 mkArgsT cs = do
   names <- sequence $ replicate (length cs) (newName "x")
-  let context = concat $ zipWith (\(PGArgument _ t _) n -> mkContextT ''ToField t False n) cs names
+  let context = concat $ zipWith (\(PGArgument _ t _) n -> mkContextT ''ToField t n) cs names
 
   let defWrap d = case d of
         True  -> AppT (ConT ''Maybe)

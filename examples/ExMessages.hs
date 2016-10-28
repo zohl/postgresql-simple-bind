@@ -58,4 +58,6 @@ specMessages conn = describe "Messages example" $ it "works" $ mapM_ runTests [
     sqlMarkAsRead conn "mr_foo" msg1
     sqlMarkAsRead conn "mr_bar" msg3
 
-    sqlSendMessage conn "mr_foo" Nothing
+    msg4 <- sqlSendMessage conn "mr_baz" Nothing
+    sqlGetNewMessages conn "mr_baz" >>= shouldBe [(msg4, Nothing)] . map (\(a, _, b) -> (a, b))
+    sqlMarkAsRead conn "mr_baz" msg4
