@@ -4,7 +4,7 @@
 }:
 mkDerivation {
   pname = "postgresql-simple-bind";
-  version = "0.2.1.0";
+  version = "0.3.0.0";
   src = ./.;
   libraryHaskellDepends = [
     attoparsec base bytestring data-default exceptions heredoc

@@ -1,5 +1,5 @@
 name:                postgresql-simple-bind
-version:             0.2.1.0
+version:             0.3.0.0
 synopsis:            FFI-like bindings for PostgreSQL stored functions
 description:         For tutorial see here: https:\/\/github.com\/zohl\/postgresql-simple-bind\/blob\/master\/README.md
 license:             BSD3
