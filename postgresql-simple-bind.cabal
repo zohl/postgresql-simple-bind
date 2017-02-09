@@ -6,11 +6,13 @@ license:             BSD3
 license-file:        LICENSE
 author:              Al Zohali
 maintainer:          Al Zohali <zohl@fmap.me>
--- copyright:
+
 category:            Database
 build-type:          Simple
--- extra-source-files:
 cabal-version:       >=1.10
+
+extra-source-files:
+  CHANGELOG.md
 
 flag dev
   description: Turn on development settings.
