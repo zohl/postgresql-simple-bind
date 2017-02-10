@@ -3,6 +3,7 @@
 ## [Unreleased]
 ### Added
 - Changelog.
+- Explicit type casts options.
 
 ## [0.3.0] - 2016-10-29
 ### Added

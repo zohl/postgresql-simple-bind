@@ -42,9 +42,14 @@ data ReturnType
 
 -- | Options that specify how to construct the function binding.
 data PostgresBindOptions = PostgresBindOptions {
-    pboFunctionName    :: PGFunction -> String     -- ^ Function that generates name of a binding.
-  , pboIsNullable      :: String -> String -> Bool -- ^ Which columns in returned tables can be null.
-  , pboSetOfReturnType :: String -> ReturnType     -- ^ How to process type in "setof" clause.
+    pboFunctionName    :: PGFunction -> String
+    -- ^ Function that generates name of a binding.
+  , pboIsNullable      :: String -> String -> Bool
+    -- ^ Which columns in returned tables can be null.
+  , pboSetOfReturnType :: String -> ReturnType
+    -- ^ How to process type in "setof" clause.
+  , pboExplicitCasts :: Bool
+    -- ^ Whether to add explicit type casts to arguments.
   }
 
 instance Default PostgresBindOptions where
@@ -52,6 +57,7 @@ instance Default PostgresBindOptions where
       pboFunctionName    = \(PGFunction _schema name _args _result) -> name
     , pboIsNullable      = \_fname _column -> False
     , pboSetOfReturnType = \_tname -> AsField
+    , pboExplicitCasts   = True
     }
 
 -- | Remove 'Only' constructor.
