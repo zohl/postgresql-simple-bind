@@ -4,6 +4,8 @@
 ### Added
 - Changelog.
 - Explicit type casts options.
+### Changed
+- Flag `older-call-syntax` is an option now.
 
 ## [0.3.0] - 2016-10-29
 ### Added

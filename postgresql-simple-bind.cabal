@@ -24,12 +24,6 @@ flag db-tests
   manual:      False
   default:     False
 
-flag older-call-syntax
-  description: Turn on usage of (:=) in queries instead of (=>). This
-               is necessary for PostgreSQL < 9.5.
-  manual:      True
-  default:     True
-
 flag debug-queries
   description: Turn on output of executed queries.
   manual:      False
@@ -68,9 +62,6 @@ library
     ghc-options:      -Wall -Werror
   else
     ghc-options:      -O2 -Wall
-
-  if flag(older-call-syntax)
-    cpp-options: -DOlderCallSyntax
 
   if flag(debug-queries)
     cpp-options: -DDebugQueries

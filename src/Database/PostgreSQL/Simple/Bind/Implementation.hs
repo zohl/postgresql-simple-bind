@@ -52,7 +52,7 @@ import Database.PostgreSQL.Simple.FromRow (FromRow(..))
 import Database.PostgreSQL.Simple.Types (Query(..))
 import GHC.TypeLits (Symbol)
 import Language.Haskell.TH.Syntax (Q, Dec(..), Exp(..), Type(..), Clause(..), Body(..), Pat(..))
-import Language.Haskell.TH.Syntax (Name, mkName, newName, Lit(..), TyLit(..), TyVarBndr(..), lift)
+import Language.Haskell.TH.Syntax (Name, mkName, newName, Lit(..), TyLit(..), TyVarBndr(..))
 import qualified Data.ByteString.Char8 as BS
 
 -- | Mapping from PostgreSQL types to Haskell types.
@@ -83,28 +83,28 @@ instance ToField Argument where
   toField (OptionalArg   name _atype Nothing)  = throw . DefaultValueNotFound $ name
 
 
-callExpression :: String
-#ifdef OlderCallSyntax
-callExpression = " := "
-#else
-callExpression = " => "
-#endif
+untypedPlaceholder, typedPlaceholder :: String -> String
+untypedPlaceholder = const "?"
+typedPlaceholder atype = "(?)::" ++ atype
 
-formatArgument :: Bool -> Argument -> Maybe String
-formatArgument cast = format where
+
+formatArgument :: String -> (String -> String) -> Argument -> Maybe String
+formatArgument callSyntax placeholder = format where
   format = \case
     (MandatoryArg _name atype _value) -> Just $ placeholder atype
 
     (OptionalArg name atype (Just _value)) -> Just . concat $ [
-        name , callExpression, placeholder atype]
+        name, callSyntax, placeholder atype]
 
     (OptionalArg _name _atype Nothing) -> Nothing
 
-  placeholder atype = if cast then ("(?)::" ++ atype) else "?"
 
+formatArguments :: String -> (String -> String) -> [Argument] -> String
+formatArguments callSyntax placeholder = concat
+  . (intersperse ",")
+  . catMaybes
+  . (map $ formatArgument callSyntax placeholder)
 
-formatArguments :: Bool -> [Argument] -> String
-formatArguments cast = concat . (intersperse ",") . catMaybes . (map $ formatArgument cast)
 
 filterArguments :: [Argument] -> [Argument]
 filterArguments = filter isPresented where
@@ -204,17 +204,17 @@ traceIdWrapE = id
 --     (PGFunction "public" "foo"
 --       [PGArgument "x" "varchar" True, PGArgument "y" "bigint" False] (PGSingle "varchar"))
 --     args -> { Query $ BS.pack $ concat ["select public.foo (", (formatArguments args), ")"] }
-mkSqlQuery :: PostgresBindOptions -> PGFunction -> Maybe Name -> Q Exp
+mkSqlQuery :: PostgresBindOptions -> PGFunction -> Maybe Name -> Exp
 mkSqlQuery opt (PGFunction schema fname _args ret) argsName =
-  lift (pboExplicitCasts opt) >>= \cast ->
-    return . toQuery . traceIdWrapE . AppE (VarE 'concat) . ListE $ [
-        mkStrLit $ concat [prefix opt, " ", functionName, "("]
-      , maybe (mkStrLit "") (\args -> foldl1 AppE [
-          VarE 'formatArguments
-        , cast
-        , VarE args
-        ]) argsName
-      , mkStrLit ")"] where
+  toQuery . traceIdWrapE . AppE (VarE 'concat) . ListE $ [
+      mkStrLit $ concat [prefix opt, " ", functionName, "("]
+    , maybe (mkStrLit "") (\args -> foldl1 AppE [
+        VarE 'formatArguments
+      , mkStrLit $ if (pboOlderCallSyntax opt) then " := " else " => "
+      , VarE $ if (pboExplicitCasts opt) then 'typedPlaceholder else 'untypedPlaceholder
+      , VarE args
+      ]) argsName
+    , mkStrLit ")"] where
 
   prefix (PostgresBindOptions {..}) = case ret of
     PGTable _     -> mkSelect AsRow
@@ -274,11 +274,10 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction _schema _fname args ret
 
   let funcName = mkName $ pboFunctionName f
   let funcArgs = (VarP connName):(map VarP names)
-  sqlQuery <- mkSqlQuery opt f argsName
   let funcBody = NormalB $ unwrapE opt ret $ foldl1 AppE $ [
           VarE $ maybe 'query_ (const 'query) argsName
         , VarE connName
-        , sqlQuery
+        , mkSqlQuery opt f argsName
         ] ++ (const (traceShowIdWrapE argsExpr) <$> maybeToList argsName)
 
   let decl = (\name -> ValD (VarP name) (NormalB argsExpr) []) <$> maybeToList argsName

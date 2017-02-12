@@ -13,6 +13,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE FlexibleInstances          #-}
 
+
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Common
   Copyright:   (c) 2016 Al Zohali
@@ -48,8 +49,11 @@ data PostgresBindOptions = PostgresBindOptions {
     -- ^ Which columns in returned tables can be null.
   , pboSetOfReturnType :: String -> ReturnType
     -- ^ How to process type in "setof" clause.
-  , pboExplicitCasts :: Bool
+  , pboExplicitCasts   :: Bool
     -- ^ Whether to add explicit type casts to arguments.
+  , pboOlderCallSyntax :: Bool
+    -- ^ Whether to use old-style call syntax (:=) instead of (=>). This is
+    --   necessary for PostgreSQL < 9.5.
   }
 
 instance Default PostgresBindOptions where
@@ -58,6 +62,7 @@ instance Default PostgresBindOptions where
     , pboIsNullable      = \_fname _column -> False
     , pboSetOfReturnType = \_tname -> AsField
     , pboExplicitCasts   = True
+    , pboOlderCallSyntax = True
     }
 
 -- | Remove 'Only' constructor.
