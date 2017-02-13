@@ -40,7 +40,7 @@ before_script:
   - psql -U postgres -c "create role test_role with password 'TEST' login;"
 
 script:
-  - cabal configure --enable-tests --enable-coverage -v2 -f dev -f db-tests -f -older-call-syntax
+  - cabal configure --enable-tests --enable-coverage -v2 -f dev -f build-examples
   - cabal build
   - cabal test --show-details=always
   - cabal sdist
