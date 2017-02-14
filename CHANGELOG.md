@@ -5,7 +5,7 @@
 - Changelog.
 - Explicit type casts options.
 ### Changed
-- Flag `older-call-syntax` is an option now.
+- Flags `older-call-syntax` and `debug-queries` are options now.
 
 ## [0.3.0] - 2016-10-29
 ### Added

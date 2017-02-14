@@ -27,6 +27,7 @@ bindOptions = (def :: PostgresBindOptions) {
       "t_user" -> AsRow
       _        -> AsField
   , pboIsNullable      = isNullable
+  , pboDebugQueries    = True
   } where
     isNullable :: String -> String -> Bool
     isNullable "get_new_messages" "contents" = True

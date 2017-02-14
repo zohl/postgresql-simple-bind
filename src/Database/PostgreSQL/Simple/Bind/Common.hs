@@ -54,6 +54,8 @@ data PostgresBindOptions = PostgresBindOptions {
   , pboOlderCallSyntax :: Bool
     -- ^ Whether to use old-style call syntax (:=) instead of (=>). This is
     --   necessary for PostgreSQL < 9.5.
+  , pboDebugQueries    :: Bool
+    -- ^ Whether to print executed queries and their arguments.
   }
 
 instance Default PostgresBindOptions where
@@ -63,6 +65,7 @@ instance Default PostgresBindOptions where
     , pboSetOfReturnType = \_tname -> AsField
     , pboExplicitCasts   = True
     , pboOlderCallSyntax = True
+    , pboDebugQueries    = False
     }
 
 -- | Remove 'Only' constructor.

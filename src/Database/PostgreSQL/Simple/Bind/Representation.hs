@@ -50,6 +50,9 @@ data PostgresBindException
   | DefaultValueNotFound String
     -- ^ Thrown when 'Argument' expected to have default value while
     -- it doesn't. Actually this should never happen, but we all know...
+  | RepresentationNotFound String
+    -- ^ Thrown when 'Argument' is beign printed, but representation was't
+    -- provided. Again, this should never happen.
   deriving (Eq, Show, Typeable)
 
 instance Exception PostgresBindException

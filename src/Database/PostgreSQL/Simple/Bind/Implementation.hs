@@ -13,7 +13,6 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE RecordWildCards            #-}
-{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE LambdaCase                 #-}
 
 {-|
@@ -34,13 +33,9 @@ module Database.PostgreSQL.Simple.Bind.Implementation (
   ) where
 
 import Control.Exception (throw)
-
-#ifdef DebugQueries
-import Debug.Trace (traceId, traceShowId)
-#endif
-
+import Debug.Trace (traceIO)
 import Data.List (intersperse)
-import Data.Maybe (catMaybes, maybeToList)
+import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, query, query_)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..))
@@ -53,7 +48,9 @@ import Database.PostgreSQL.Simple.Types (Query(..))
 import GHC.TypeLits (Symbol)
 import Language.Haskell.TH.Syntax (Q, Dec(..), Exp(..), Type(..), Clause(..), Body(..), Pat(..))
 import Language.Haskell.TH.Syntax (Name, mkName, newName, Lit(..), TyLit(..), TyVarBndr(..))
+import Language.Haskell.TH.Syntax (Stmt(..))
 import qualified Data.ByteString.Char8 as BS
+
 
 -- | Mapping from PostgreSQL types to Haskell types.
 type family PostgresType (a :: Symbol)
@@ -65,23 +62,36 @@ bindFunction opt s = parsePGFunction s >>= mkFunction opt
 mkFunction :: PostgresBindOptions -> PGFunction -> Q [Dec]
 mkFunction opt f = sequence $ (($ f) . ($ opt)) <$> [mkFunctionT, mkFunctionE]
 
-#ifdef DebugQueries
-data Argument = forall a . (Show a, ToField a) => MandatoryArg String String a
-              | forall a . (Show a, ToField a) => OptionalArg String String (Maybe a)
 
-instance Show Argument where
-  show (MandatoryArg name atype value) = "mandatory: " ++ name ++ " => " ++ show value ++ "::" ++ atype
-  show (OptionalArg  name atype value) = "optional: "  ++ name ++ " => " ++ show value ++ "::" ++ atype
-#else
-data Argument = forall a . (ToField a) => MandatoryArg String String a
-              | forall a . (ToField a) => OptionalArg String String (Maybe a)
-#endif
+data Argument
+  = forall a . (ToField a) => MandatoryArg {
+        argName           :: String
+      , argType           :: String
+      , argRepresentation :: Maybe String
+      , margValue         :: a
+      }
+  | forall a . (ToField a) => OptionalArg {
+        argName           :: String
+      , argType           :: String
+      , argRepresentation :: Maybe String
+      , morgValue         :: Maybe a
+      }
 
 instance ToField Argument where
-  toField (MandatoryArg _name _atype x)        = toField x
-  toField (OptionalArg  _name _atype (Just x)) = toField x
-  toField (OptionalArg   name _atype Nothing)  = throw . DefaultValueNotFound $ name
+  toField MandatoryArg {..} = toField margValue
+  toField OptionalArg {..} = maybe
+    (throw . DefaultValueNotFound $ argName)
+    toField
+    morgValue
 
+instance Show Argument where
+  show arg = concat $ [
+      argName arg
+    , " => "
+    , maybe (throw . RepresentationNotFound $ argName arg) id (argRepresentation arg)
+    , " :: "
+    , argType arg
+    ]
 
 untypedPlaceholder, typedPlaceholder :: String -> String
 untypedPlaceholder = const "?"
@@ -91,17 +101,15 @@ typedPlaceholder atype = "(?)::" ++ atype
 formatArgument :: String -> (String -> String) -> Argument -> Maybe String
 formatArgument callSyntax placeholder = format where
   format = \case
-    (MandatoryArg _name atype _value) -> Just $ placeholder atype
-
-    (OptionalArg name atype (Just _value)) -> Just . concat $ [
-        name, callSyntax, placeholder atype]
-
-    (OptionalArg _name _atype Nothing) -> Nothing
+    MandatoryArg {..} -> Just $ placeholder argType
+    OptionalArg {..} -> fmap
+      (const . concat $ [argName, callSyntax, placeholder argType])
+      morgValue
 
 
 formatArguments :: String -> (String -> String) -> [Argument] -> String
 formatArguments callSyntax placeholder = concat
-  . (intersperse ",")
+  . (intersperse ", ")
   . catMaybes
   . (map $ formatArgument callSyntax placeholder)
 
@@ -109,8 +117,8 @@ formatArguments callSyntax placeholder = concat
 filterArguments :: [Argument] -> [Argument]
 filterArguments = filter isPresented where
   isPresented :: Argument -> Bool
-  isPresented (OptionalArg _name _atype Nothing) = False
-  isPresented _                                  = True
+  isPresented (OptionalArg {..}) = maybe False (const True) $ morgValue
+  isPresented _                  = True
 
 
 -- | Example: "varchar" -> PostgresType "varchar"
@@ -193,20 +201,13 @@ mkFunctionT opt@(PostgresBindOptions {..}) f@(PGFunction _schema fname args ret)
   return $ SigD (mkName $ pboFunctionName f) $ ForallT vars context clause
 
 
-traceIdWrapE :: Exp -> Exp
-#ifdef DebugQueries
-traceIdWrapE q = (VarE 'traceId) `AppE` q
-#else
-traceIdWrapE = id
-#endif
-
 -- | Example:
 --     (PGFunction "public" "foo"
 --       [PGArgument "x" "varchar" True, PGArgument "y" "bigint" False] (PGSingle "varchar"))
 --     args -> { Query $ BS.pack $ concat ["select public.foo (", (formatArguments args), ")"] }
 mkSqlQuery :: PostgresBindOptions -> PGFunction -> Maybe Name -> Exp
 mkSqlQuery opt (PGFunction schema fname _args ret) argsName =
-  toQuery . traceIdWrapE . AppE (VarE 'concat) . ListE $ [
+  toQuery . AppE (VarE 'concat) . ListE $ [
       mkStrLit $ concat [prefix opt, " ", functionName, "("]
     , maybe (mkStrLit "") (\args -> foldl1 AppE [
         VarE 'formatArguments
@@ -245,12 +246,17 @@ unwrapE _   (PGSingle _)    q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
 unwrapE opt (PGSetOf tname) q = unwrapE' (pboSetOfReturnType opt tname) q
 unwrapE _   (PGTable _)     q = unwrapE' AsRow q
 
-traceShowIdWrapE :: Exp -> Exp
-#ifdef DebugQueries
-traceShowIdWrapE q = (VarE 'traceShowId) `AppE` q
-#else
-traceShowIdWrapE = id
-#endif
+
+wrapArg :: PostgresBindOptions -> PGArgument -> Name -> Exp
+wrapArg (PostgresBindOptions {..}) (PGArgument n t d) argName = foldl1 AppE $ [
+    ConE $ if d then 'OptionalArg else 'MandatoryArg
+  , LitE $ StringL n
+  , LitE $ StringL t
+  , if pboDebugQueries
+      then foldr1 AppE [ConE 'Just, VarE 'show, VarE argName]
+      else ConE 'Nothing
+  , VarE argName]
+
 
 -- | Example: (PGFunction "public" "foo"
 --     [PGArgument "x" "varchar" True, PGArgument "y" "bigint" False] (PGSingle "varchar")) -> {
@@ -266,20 +272,34 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction _schema _fname args ret
     True  -> return Nothing
     False -> Just <$> newName "args"
 
-  let wrapArg (PGArgument n t d) argName = foldl1 AppE $ case d of
-        False -> [ConE 'MandatoryArg, LitE (StringL n), LitE (StringL t), VarE argName]
-        True  -> [ConE 'OptionalArg, LitE (StringL n), LitE (StringL t), VarE argName]
+  let argsExpr = (VarE 'filterArguments) `AppE` (ListE $ zipWith (wrapArg opt) args names)
 
-  let argsExpr = (VarE 'filterArguments) `AppE` (ListE $ zipWith wrapArg args names)
+  sqlQueryName <- newName "sqlQuery"
+  let sqlQueryExpr = mkSqlQuery opt f argsName
 
   let funcName = mkName $ pboFunctionName f
   let funcArgs = (VarP connName):(map VarP names)
-  let funcBody = NormalB $ unwrapE opt ret $ foldl1 AppE $ [
-          VarE $ maybe 'query_ (const 'query) argsName
-        , VarE connName
-        , mkSqlQuery opt f argsName
-        ] ++ (const (traceShowIdWrapE argsExpr) <$> maybeToList argsName)
 
-  let decl = (\name -> ValD (VarP name) (NormalB argsExpr) []) <$> maybeToList argsName
-  return $ FunD funcName [Clause funcArgs funcBody decl]
+  let funcBody = NormalB $ if pboDebugQueries
+        then DoE $ NoBindS <$> [traceQuery, traceArgs, execQuery]
+        else execQuery
+        where
+          traceQuery = foldr1 AppE [VarE 'traceIO, VarE 'show, VarE sqlQueryName]
+
+          traceArgs = foldr1 AppE . maybe
+             [VarE 'traceIO, LitE $ StringL "no arguments"]
+             (\name -> [VarE 'traceIO, VarE 'show, VarE name])
+             $ argsName
+
+          execQuery = unwrapE opt ret $ foldl1 AppE $ [
+                VarE $ maybe 'query_ (const 'query) argsName
+              , VarE connName
+              , sqlQueryExpr
+              ] ++ (maybe [] (return . VarE) argsName)
+
+  let funcDecl = [
+          ValD (VarP sqlQueryName) (NormalB sqlQueryExpr) []
+        ] ++ (maybe [] (\name -> return $ ValD (VarP name) (NormalB argsExpr) []) argsName)
+
+  return $ FunD funcName [Clause funcArgs funcBody funcDecl]
 
