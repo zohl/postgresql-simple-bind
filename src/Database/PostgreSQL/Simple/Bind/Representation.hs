@@ -12,6 +12,8 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE LambdaCase                 #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Representation
@@ -58,19 +60,33 @@ data PostgresBindException
 instance Exception PostgresBindException
 
 
--- | Representation of a function's argument (name, type, is optional).
-data PGArgument = PGArgument String String Bool deriving (Show, Eq)
+-- | Representation of a function's argument.
+data PGArgument = PGArgument {
+    pgaName     :: String
+  , pgaType     :: String
+  , pgaOptional :: Bool
+  } deriving (Show, Eq)
 
 -- | Representation of a PostrgeSQL function signature (schema, name, arguments, result).
-data PGFunction = PGFunction String String [PGArgument] PGResult deriving (Show, Eq)
+data PGFunction = PGFunction {
+    pgfSchema    :: String
+  , pgfName      :: String
+  , pgfArguments :: [PGArgument]
+  , pgfResult    :: PGResult
+  } deriving (Show, Eq)
 
 -- | Representation of a resultant's column (name, type).
-data PGColumn = PGColumn String String deriving (Show, Eq)
+data PGColumn = PGColumn {
+    pgcName :: String
+  , pgcType :: String
+  } deriving (Show, Eq)
 
 -- | Representation of a function's return value.
-data PGResult = PGSingle String
-              | PGSetOf String
-              | PGTable [PGColumn] deriving (Show, Eq)
+data PGResult
+  = PGSingle { pgrSinlgeType :: String }
+  | PGSetOf  { pgrSetOfTypes :: String }
+  | PGTable  { pgrTable :: [PGColumn] }
+    deriving (Show, Eq)
 
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.
 parsePGFunction :: (MonadThrow m) => Text -> m PGFunction
@@ -81,39 +97,36 @@ parsePGFunction s = either
     ss = skipSpace
 
     function = do
-      _      <- asciiCI "function"
-      schema <- ss *> ((identifier <* (char '.')) <|> (string ""))
-      name   <- ss *> identifier
-      args   <- ss *> char '(' *> (arguments `sepBy` (char ','))
-      ret    <- ss *> char ')' *> returnType
-      _      <- ss
-      return $ PGFunction (unpack schema) (unpack name) args ret
+      _            <- asciiCI "function"
+      pgfSchema    <- fmap unpack $ ss *> ((identifier <* (char '.')) <|> (string ""))
+      pgfName      <- fmap unpack $ ss *> identifier
+      pgfArguments <- ss *> char '(' *> (arguments `sepBy` (char ','))
+      pgfResult    <- ss *> char ')' *> returnType
+      _            <- ss
+      return PGFunction {..}
 
     arguments = do
-      name     <- ss *> identifier
-      datatype <- ss *> postgresType
-      def      <- ss *> ((asciiCI "default" <|> string "=") *> (takeTill (inClass ",)"))
-                                                           <|> (string ""))
+      pgaName     <- fmap unpack $ ss *> identifier
+      pgaType     <- fmap unpack $ ss *> postgresType
+      pgaOptional <- fmap (( > 0) . length) $ ss *> (
+              (asciiCI "default" <|> string "=") *> (takeTill (inClass ",)"))
+          <|> (string ""))
       -- WARNING: parsing default values requires ability to parse almost arbitraty expressions.
       -- Here is a quick and dirty implementation of the parser.
-
-      return $ PGArgument (unpack name) (unpack datatype) ((length def) > 0)
+      return PGArgument {..}
 
     cols = do
-      name     <- ss *> identifier
-      datatype <- ss *> postgresType <* ss
-      return $ PGColumn (unpack name) (unpack datatype)
+      pgcName <- fmap unpack $ ss *> identifier
+      pgcType <- fmap unpack $ ss *> postgresType <* ss
+      return PGColumn {..}
 
-    returnType = do
-      ret <- ss *> asciiCI "returns" *> ss *> (
-                 asciiCI "setof"
-             <|> asciiCI "table"
-             <|> postgresType)
-
-      case toLower(ret) of
-        "setof" -> (PGSetOf . unpack) <$> (ss *> postgresType)
-        "table" -> PGTable <$> (ss *> char '(' *> cols `sepBy` (char ',') <* ss <* char ')')
-        t       -> return $ PGSingle (unpack t)
+    returnType = ss *> asciiCI "returns" *> ss *> (fmap toLower $
+          asciiCI "setof"
+      <|> asciiCI "table"
+      <|> postgresType) >>= \case
+          "setof" -> (PGSetOf . unpack) <$> (ss *> postgresType)
+          "table" -> PGTable <$> (ss *> char '(' *> cols `sepBy` (char ',') <* ss <* char ')')
+          t       -> return $ PGSingle (unpack t)
 
     identifier = do
       s1 <- takeWhile1 (inClass "a-zA-Z_")
@@ -170,3 +183,4 @@ parsePGFunction s = either
             _ -> (modifiers $ Just (n - 1)))
 
     modifier = (decimal :: Parser Int) *> ss
+
