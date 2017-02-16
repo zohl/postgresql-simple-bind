@@ -83,9 +83,9 @@ data PGColumn = PGColumn {
 
 -- | Representation of a function's return value.
 data PGResult
-  = PGSingle { pgrSinlgeType :: String }
-  | PGSetOf  { pgrSetOfTypes :: String }
-  | PGTable  { pgrTable :: [PGColumn] }
+  = PGSingle String
+  | PGSetOf  String
+  | PGTable  [PGColumn]
     deriving (Show, Eq)
 
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.
