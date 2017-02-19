@@ -33,7 +33,8 @@ install:
   - cabal --version
   - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
   - travis_retry cabal update
-  - cabal install -v --configure-option '-f build-examples' --only-dependencies --enable-tests
+  - cabal install -v --only-dependencies --enable-tests
+  - cabal install -v case-conversion
 
 before_script:
   - psql -U postgres -c 'create database test_db;'
