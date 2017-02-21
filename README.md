@@ -122,6 +122,22 @@ There are no plans to introduce breaking changes into the current API.
   easier to employ this mechanism rather than write a parser from
   scratch.
 
+### pboExplicitCasts
+  Some sql queries may fail due to ambiguous types. With this option
+  enabled every expression will be explicitly casted to function
+  argument types.
+
+### pboOlderCallSyntax
+  Since version `9.5` PostgreSQL supports `=>` for named notations in
+  function calls. Older syntax `:=` is supported for backward
+  compatibility.
+
+### pboDebugQueries
+  When enabled, every generated function will print to `stdout`
+  arguments passed to it. Note, this will fail (compile-time) for
+  types without `Show` instances.
+
+
 ## Automated generation
   It can be tedious to manually maintain consistent function declarations
   across the codebase. More convenient way is to automatically generate module
