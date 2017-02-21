@@ -1,5 +1,5 @@
 name:                postgresql-simple-bind
-version:             0.3.0.0
+version:             0.4.0
 synopsis:            FFI-like bindings for PostgreSQL stored functions
 description:         For tutorial see here: https:\/\/github.com\/zohl\/postgresql-simple-bind\/blob\/master\/README.md
 license:             BSD3
@@ -88,7 +88,7 @@ test-suite examples
   main-is:          Main.hs
   default-language: Haskell2010
 
-  ghc-options: -Wall -Wno-redundant-constraints -ddump-splices
+  ghc-options: -Wall -Wno-redundant-constraints
 
   if flag(build-examples)
     build-depends: base >= 4.7 && < 5.0

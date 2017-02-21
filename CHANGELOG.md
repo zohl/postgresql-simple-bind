@@ -1,9 +1,12 @@
 # Change Log
 
 ## [Unreleased]
+
+## [0.4.0]
 ### Added
 - Changelog.
 - Explicit type casts options.
+
 ### Changed
 - Flags `older-call-syntax` and `debug-queries` are options now.
 
@@ -19,6 +22,7 @@
 ## [0.2.0] - 2016-08-21
 ### Added
 - Cabal flag `dev`.
+
 ### Changed
 - Relicensed to `BSD3`.
 - Refactored tests (now using `hspec`).
@@ -28,7 +32,8 @@
 ### Added
 - Initial version of the package.
 
-[Unreleased]: ../../compare/v0.3.0...HEAD
+[Unreleased]: ../../compare/v0.4.0...HEAD
+[0.4.0]: ../../compare/v0.3.0...v0.4.0
 [0.3.0]: ../../compare/v0.2.1...v0.3.0
 [0.2.1]: ../../compare/v0.2.0...v0.2.1
 [0.2.0]: ../../compare/v0.1.0...v0.2.0
