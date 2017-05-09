@@ -1,6 +1,10 @@
 # Change Log
 
-## [Unreleased]
+## [HEAD]
+
+## [0.4.1]
+### Changed
+- Fixed missing files.
 
 ## [0.4.0]
 ### Added
@@ -32,7 +36,8 @@
 ### Added
 - Initial version of the package.
 
-[Unreleased]: ../../compare/v0.4.0...HEAD
+[HEAD]:  ../../compare/v0.4.1...HEAD
+[0.4.1]: ../../compare/v0.4.0...v0.4.1
 [0.4.0]: ../../compare/v0.3.0...v0.4.0
 [0.3.0]: ../../compare/v0.2.1...v0.3.0
 [0.2.1]: ../../compare/v0.2.0...v0.2.1
