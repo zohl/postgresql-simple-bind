@@ -17,8 +17,7 @@ import Text.CaseConversion (convertCase, WordCase(..))
 import qualified Data.ByteString.Char8 as BS
 
 mkFunctionName :: PGFunction -> String
-mkFunctionName (PGFunction _schema name _args _result)
-  = convertCase Snake Camel . ("sql_" ++) $ name
+mkFunctionName = convertCase Snake Camel . ("sql_" ++) . pgfName
 
 bindOptions :: PostgresBindOptions
 bindOptions = (def :: PostgresBindOptions) {
