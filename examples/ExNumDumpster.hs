@@ -15,7 +15,7 @@ module ExNumDumpster (
     specNumDumpster
   ) where
 
-import Common (bindOptions, include)
+import Common (bindOptions, initFromDirectory)
 import Database.PostgreSQL.Simple (Connection)
 import Database.PostgreSQL.Simple.Bind (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Types()
@@ -46,7 +46,7 @@ iterFib conn = do
 
 specNumDumpster :: Connection -> Spec
 specNumDumpster conn = describe "NumDumpster example" $ it "works" $ do
-  include conn "./examples/sql/numdumpster.sql"
+  initFromDirectory conn "./examples/sql/numdumpster"
 
   sqlAddNum conn 1
   sqlGetLastNum conn >>= shouldBe 1
