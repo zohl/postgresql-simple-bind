@@ -26,17 +26,51 @@
 
 module Database.PostgreSQL.Simple.Bind.Utils (
     getFunctionDeclaration
+  , getDeclarationsFromFile
+
+  , bindDeclarationsFromFile
+  , bindDeclarationsFromDirectory
+
   , generateBindingsModule
   ) where
 
 
 import Control.Arrow ((***))
 import Data.List (intersperse)
+import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, Only(..), query)
-import Database.PostgreSQL.Simple.Bind.Common (unwrapColumn)
+import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions, unwrapColumn)
+import Database.PostgreSQL.Simple.Bind.Implementation (bindFunction)
+import Language.Haskell.TH.Syntax (Q, Dec, addDependentFile, runIO)
 import Text.Heredoc (str)
+import System.Directory (doesDirectoryExist, listDirectory)
+import System.FilePath.Posix ((</>))
 import Database.PostgreSQL.Simple.SqlQQ (sql)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
+
+
+-- | Fetch function declaration(s) from file.
+getDeclarationsFromFile :: FilePath -> IO [Text]
+getDeclarationsFromFile fn = do
+  -- TODO: this is a stub
+  header <- (fst . T.breakOn " as" . snd . T.breakOnEnd "create ") <$> T.readFile fn
+  return [header]
+
+-- | Fetch and bind function declaration(s) from file.
+bindDeclarationsFromFile :: PostgresBindOptions -> FilePath -> Q [Dec]
+bindDeclarationsFromFile bindOptions fn =
+  addDependentFile fn >> runIO (getDeclarationsFromFile fn) >>= fmap concat . mapM (bindFunction bindOptions)
+
+-- | Fetch and bind function declarations from all files in the specified directory.
+bindDeclarationsFromDirectory :: PostgresBindOptions -> FilePath -> Q [Dec]
+bindDeclarationsFromDirectory bindOptions fn = do
+  exists <- runIO (doesDirectoryExist fn)
+  if not exists
+     then return []
+     else runIO (listDirectory fn)
+          >>= fmap concat . mapM (bindDeclarationsFromFile bindOptions) . (fmap (fn </>))
+
 
 -- | Fetch function declaration(s) from database.
 getFunctionDeclaration :: Connection -> String -> IO [String]
@@ -53,7 +87,6 @@ getFunctionDeclaration conn name = unwrapColumn <$> query conn sql' (Only $ T.pa
         and not p.proiswindow
         and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
     |]
-
 
 -- | Generate module with bindings.
 generateBindingsModule
@@ -90,4 +123,5 @@ generateBindingsModule conn opt name ns = do
       |]
     , (mkList . map (("\"" ++) . (++ "\"")) $ ds)
     , "\n  ]"]
+
 

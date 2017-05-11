@@ -17,18 +17,12 @@ module ExNumDumpster (
 
 import Common (bindOptions, initFromDirectory)
 import Database.PostgreSQL.Simple (Connection)
-import Database.PostgreSQL.Simple.Bind (bindFunction)
+import Database.PostgreSQL.Simple.Bind.Utils (bindDeclarationsFromDirectory)
 import Database.PostgreSQL.Simple.Bind.Types()
 import Test.Hspec (Spec, describe, it, shouldBe)
 
+bindDeclarationsFromDirectory bindOptions "./examples/sql/numdumpster/functions"
 
-concat <$> mapM (bindFunction bindOptions) [
-    "function add_num(p_x bigint) returns void"
-  , "function get_last_num() returns bigint"
-  , "function get_range(p_range_min bigint default null, p_range_max bigint default null) returns setof bigint"
-  , "function get_all_nums() returns setof bigint"
-  , "function clear() returns void"
-  ]
 
 addManyNums :: Connection -> [Int] -> IO ()
 addManyNums conn xs = mapM_ (sqlAddNum conn) xs
