@@ -21,20 +21,18 @@ module ExUsers (
     specUsers
   ) where
 
-import Common (bindOptions, include)
+import Common (bindOptions, initFromDirectory)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection)
 import Database.PostgreSQL.Simple.FromRow (FromRow)
-import Database.PostgreSQL.Simple.Bind (bindFunction, PostgresType)
+import Database.PostgreSQL.Simple.Bind (PostgresType)
 import Database.PostgreSQL.Simple.Bind.Types()
+import Database.PostgreSQL.Simple.Bind.Utils (bindDeclarationsFromDirectory)
 import GHC.Generics (Generic)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
-concat <$> mapM (bindFunction bindOptions) [
-    "function get_users(p_filter varchar2 default '') returns setof t_user"
-  , "function add_user(p_name varchar2, p_age bigint) returns bigint"
-  , "function del_user(p_user_id bigint) returns void"
-  ]
+bindDeclarationsFromDirectory bindOptions "./examples/sql/users/functions"
+
 
 type instance PostgresType "varchar2" = Text
 
@@ -51,7 +49,7 @@ type instance PostgresType "t_user" = User
 
 specUsers :: Connection -> Spec
 specUsers conn = describe "Users example" $ it "works" $ do
-  include conn "./examples/sql/users.sql"
+  initFromDirectory conn "./examples/sql/users"
 
   mrFooId <- sqlAddUser conn "Mr. Foo" 42
   mrBarId <- sqlAddUser conn "Mr. Bar" 53

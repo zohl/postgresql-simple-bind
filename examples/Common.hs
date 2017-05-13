@@ -11,6 +11,7 @@ module Common (
   ) where
 
 import Data.Default (def)
+import Data.List (sort)
 import Control.Exception.Base (bracket)
 import Control.Monad (void, when)
 import Database.PostgreSQL.Simple (Connection, ConnectInfo, connect, begin, rollback, close, execute_)
@@ -51,7 +52,7 @@ include conn fn = void $ BS.readFile fn >>= (execute_ conn . Query)
 includeAll :: Connection -> FilePath -> IO ()
 includeAll conn fn = do
   exists <- doesDirectoryExist fn
-  when exists $ listDirectory fn >>= mapM_ (include conn) . (fmap (fn </>))
+  when exists $ listDirectory fn >>= mapM_ (include conn) . (fmap (fn </>)) . sort
 
 initFromDirectory :: Connection -> FilePath -> IO ()
-initFromDirectory conn fn = mapM_ (includeAll conn) . (fmap (fn </>)) $ ["types", "tables", "functions"]
+initFromDirectory conn fn = mapM_ (includeAll conn) . (fmap (fn </>)) $ ["domains", "types", "tables", "functions"]

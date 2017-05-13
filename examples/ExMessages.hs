@@ -18,31 +18,27 @@ module ExMessages (
     specMessages
   ) where
 
-import Common (bindOptions, include)
+import Common (bindOptions, include, initFromDirectory)
 import Database.PostgreSQL.Simple (Connection)
-import Database.PostgreSQL.Simple.Bind (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Types()
+import Database.PostgreSQL.Simple.Bind.Utils (bindDeclarationsFromDirectory)
 import Prelude hiding (getContents)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
-concat <$> mapM (bindFunction bindOptions) [
-    "function send_message(p_receiver varchar, p_contents varchar default null) returns bigint"
-  , "function get_new_messages(p_receiver varchar) returns table (message_id bigint, sender varchar, contents varchar)"
-  , "function mark_as_read(p_receiver varchar, p_message_id bigint) returns void"
-  ]
+bindDeclarationsFromDirectory bindOptions "./examples/sql/messages/functions"
 
 
 specMessages :: Connection -> Spec
 specMessages conn = describe "Messages example" $ it "works" $ mapM_ runTests [
-    "./examples/sql/messages.sql"
-  , "./examples/sql/messages-patch-1.sql"
-  , "./examples/sql/messages-patch-2.sql"
+    initFromDirectory conn "./examples/sql/messages"
+  , include conn "./examples/sql/messages/updates/patch-1.sql"
+  , include conn "./examples/sql/messages/updates/patch-2.sql"
   ] where
 
   getId (x, _, _) = x
 
-  runTests fn = do
-    include conn fn
+  runTests update = do
+    update
 
     msg1 <- sqlSendMessage conn "mr_foo" (Just "hello!")
     msg2 <- sqlSendMessage conn "mr_bar" (Just "hello!")

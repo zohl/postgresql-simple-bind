@@ -4,7 +4,7 @@ create table accounts (
 );
 
 insert into accounts(account_id, name)
-  select nextval('s_id') as account_id
+  select nextval('messages_message_id_seq') as account_id
        , t.name
   from (
     select distinct sender as name from messages
@@ -29,10 +29,9 @@ alter table messages
 
 create or replace function send_message(p_receiver varchar, p_contents varchar default null) returns bigint as
 $send_message$
-  insert into messages(message_id, sender_id, receiver_id, contents)
+  insert into messages(sender_id, receiver_id, contents)
   values (
-    nextval('s_id')
-  , (select account_id from accounts where name = user)
+    (select account_id from accounts where name = user)
   , (select account_id from accounts where name = p_receiver)
   , p_contents)
   returning message_id;
