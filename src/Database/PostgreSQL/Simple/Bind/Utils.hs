@@ -39,7 +39,7 @@ import Control.Arrow ((***))
 import Data.List (intersperse)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, Only(..), query)
-import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions, unwrapColumn)
+import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), unwrapColumn)
 import Database.PostgreSQL.Simple.Bind.Implementation (bindFunction)
 import Language.Haskell.TH.Syntax (Q, Dec, addDependentFile, runIO)
 import Text.Heredoc (str)
@@ -69,7 +69,10 @@ bindDeclarationsFromDirectory bindOptions fn = do
   if not exists
      then return []
      else runIO (listDirectory fn)
-          >>= fmap concat . mapM (bindDeclarationsFromFile bindOptions) . (fmap (fn </>))
+          >>= fmap concat
+          . mapM (bindDeclarationsFromFile bindOptions)
+          . filter (not . pboIgnoreFiles bindOptions)
+          . fmap (fn </>)
 
 
 -- | Fetch function declaration(s) from database.

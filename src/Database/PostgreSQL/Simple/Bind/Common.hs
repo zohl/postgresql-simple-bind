@@ -56,16 +56,19 @@ data PostgresBindOptions = PostgresBindOptions {
     --   necessary for PostgreSQL < 9.5.
   , pboDebugQueries    :: Bool
     -- ^ Whether to print executed queries and their arguments.
+  , pboIgnoreFiles     :: FilePath -> Bool
+    -- ^ Which files do not search for bindings.
   }
 
 instance Default PostgresBindOptions where
   def = PostgresBindOptions {
-      pboFunctionName    = \(PGFunction _schema name _args _result) -> name
-    , pboIsNullable      = \_fname _column -> False
-    , pboSetOfReturnType = \_tname -> AsField
+      pboFunctionName    = pgfName
+    , pboIsNullable      = const . const $ False
+    , pboSetOfReturnType = const AsField
     , pboExplicitCasts   = True
     , pboOlderCallSyntax = True
     , pboDebugQueries    = False
+    , pboIgnoreFiles     = const True
     }
 
 -- | Remove 'Only' constructor.

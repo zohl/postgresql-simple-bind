@@ -11,7 +11,7 @@ module Common (
   ) where
 
 import Data.Default (def)
-import Data.List (sort)
+import Data.List (sort, isInfixOf)
 import Control.Exception.Base (bracket)
 import Control.Monad (void, when)
 import Database.PostgreSQL.Simple (Connection, ConnectInfo, connect, begin, rollback, close, execute_)
@@ -34,6 +34,7 @@ bindOptions = (def :: PostgresBindOptions) {
       _        -> AsField
   , pboIsNullable      = isNullable
   , pboDebugQueries    = True
+  , pboIgnoreFiles     = isInfixOf "nvl"
   } where
     isNullable :: String -> String -> Bool
     isNullable "get_new_messages" "contents" = True
