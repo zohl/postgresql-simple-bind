@@ -25,11 +25,9 @@
 
 
 module Database.PostgreSQL.Simple.Bind.Utils (
-    getFunctionDeclaration
-  , getDeclarationsFromFile
-
-  , bindDeclarationsFromFile
-  , bindDeclarationsFromDirectory
+    bindFunctionsFromText
+  , bindFunctionsFromFile
+  , bindFunctionsFromDirectory
 
   , generateBindingsModule
   ) where
@@ -41,6 +39,7 @@ import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, Only(..), query)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), unwrapColumn)
 import Database.PostgreSQL.Simple.Bind.Implementation (bindFunction)
+import Database.PostgreSQL.Simple.Bind.Representation (parsePGFunction)
 import Language.Haskell.TH.Syntax (Q, Dec, addDependentFile, runIO)
 import Text.Heredoc (str)
 import System.Directory (doesDirectoryExist, listDirectory)
@@ -50,27 +49,31 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 
--- | Fetch function declaration(s) from file.
-getDeclarationsFromFile :: FilePath -> IO [Text]
-getDeclarationsFromFile fn = do
-  -- TODO: this is a stub
-  header <- (fst . T.breakOn " as" . snd . T.breakOnEnd "create ") <$> T.readFile fn
-  return [header]
+-- | Bind functions from specified text.
+bindFunctionsFromText :: PostgresBindOptions -> Text -> Q [Dec]
+bindFunctionsFromText opt s = parsePGFunction s >>= bindFunction opt
 
--- | Fetch and bind function declaration(s) from file.
-bindDeclarationsFromFile :: PostgresBindOptions -> FilePath -> Q [Dec]
-bindDeclarationsFromFile bindOptions fn =
-  addDependentFile fn >> runIO (getDeclarationsFromFile fn) >>= fmap concat . mapM (bindFunction bindOptions)
+-- TODO: merge with 'bindFunctionsFromText'
+bindFunctionsFromText' :: PostgresBindOptions -> Text -> Q [Dec]
+bindFunctionsFromText' opt = bindFunctionsFromText opt
+  . fst . T.breakOn " as" . snd . T.breakOnEnd "create "
 
--- | Fetch and bind function declarations from all files in the specified directory.
-bindDeclarationsFromDirectory :: PostgresBindOptions -> FilePath -> Q [Dec]
-bindDeclarationsFromDirectory bindOptions fn = do
+-- | Bind functions found in specified file.
+bindFunctionsFromFile :: PostgresBindOptions -> FilePath -> Q [Dec]
+bindFunctionsFromFile opt fn = do
+  addDependentFile fn
+  runIO (T.readFile fn)
+    >>= bindFunctionsFromText' opt
+
+-- | Bind functions found in all files in specified directory.
+bindFunctionsFromDirectory :: PostgresBindOptions -> FilePath -> Q [Dec]
+bindFunctionsFromDirectory bindOptions fn = do
   exists <- runIO (doesDirectoryExist fn)
   if not exists
      then return []
      else runIO (listDirectory fn)
           >>= fmap concat
-          . mapM (bindDeclarationsFromFile bindOptions)
+          . mapM (bindFunctionsFromFile bindOptions)
           . filter (not . pboIgnoreFiles bindOptions)
           . fmap (fn </>)
 

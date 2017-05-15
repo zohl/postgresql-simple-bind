@@ -27,11 +27,11 @@ import Database.PostgreSQL.Simple (Connection)
 import Database.PostgreSQL.Simple.FromRow (FromRow)
 import Database.PostgreSQL.Simple.Bind (PostgresType)
 import Database.PostgreSQL.Simple.Bind.Types()
-import Database.PostgreSQL.Simple.Bind.Utils (bindDeclarationsFromDirectory)
+import Database.PostgreSQL.Simple.Bind (bindFunctionsFromDirectory)
 import GHC.Generics (Generic)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
-bindDeclarationsFromDirectory bindOptions "./examples/sql/users/functions"
+bindFunctionsFromDirectory bindOptions "./examples/sql/users/functions"
 
 
 type instance PostgresType "varchar2" = Text

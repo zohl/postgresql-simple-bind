@@ -36,10 +36,9 @@ import Control.Exception (throw)
 import Debug.Trace (traceIO)
 import Data.List (intersperse)
 import Data.Maybe (catMaybes)
-import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, query, query_)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..))
-import Database.PostgreSQL.Simple.Bind.Representation (parsePGFunction, PostgresBindException(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Common (unwrapRow, unwrapColumn, PostgresBindOptions(..), ReturnType(..))
 import Database.PostgreSQL.Simple.FromField (FromField)
 import Database.PostgreSQL.Simple.ToField (ToField(..))
@@ -55,12 +54,9 @@ import qualified Data.ByteString.Char8 as BS
 -- | Mapping from PostgreSQL types to Haskell types.
 type family PostgresType (a :: Symbol)
 
--- | Function that constructs binding for PostgreSQL stored function by it's signature.
-bindFunction :: PostgresBindOptions -> Text -> Q [Dec]
-bindFunction opt s = parsePGFunction s >>= mkFunction opt
-
-mkFunction :: PostgresBindOptions -> PGFunction -> Q [Dec]
-mkFunction opt f = sequence $ (($ f) . ($ opt)) <$> [mkFunctionT, mkFunctionE]
+-- | Create binding from given representation of a PostgreSQL function.
+bindFunction :: PostgresBindOptions -> PGFunction -> Q [Dec]
+bindFunction opt f = sequence $ (($ f) . ($ opt)) <$> [mkFunctionT, mkFunctionE]
 
 
 data Argument

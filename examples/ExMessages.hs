@@ -21,11 +21,11 @@ module ExMessages (
 import Common (bindOptions, include, initFromDirectory)
 import Database.PostgreSQL.Simple (Connection)
 import Database.PostgreSQL.Simple.Bind.Types()
-import Database.PostgreSQL.Simple.Bind.Utils (bindDeclarationsFromDirectory)
+import Database.PostgreSQL.Simple.Bind (bindFunctionsFromDirectory)
 import Prelude hiding (getContents)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
-bindDeclarationsFromDirectory bindOptions "./examples/sql/messages/functions"
+bindFunctionsFromDirectory bindOptions "./examples/sql/messages/functions"
 
 
 specMessages :: Connection -> Spec

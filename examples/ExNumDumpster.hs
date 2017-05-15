@@ -17,11 +17,11 @@ module ExNumDumpster (
 
 import Common (bindOptions, initFromDirectory)
 import Database.PostgreSQL.Simple (Connection)
-import Database.PostgreSQL.Simple.Bind.Utils (bindDeclarationsFromDirectory)
+import Database.PostgreSQL.Simple.Bind (bindFunctionsFromDirectory)
 import Database.PostgreSQL.Simple.Bind.Types()
 import Test.Hspec (Spec, describe, it, shouldBe)
 
-bindDeclarationsFromDirectory bindOptions "./examples/sql/numdumpster/functions"
+bindFunctionsFromDirectory bindOptions "./examples/sql/numdumpster/functions"
 
 
 addManyNums :: Connection -> [Int] -> IO ()
