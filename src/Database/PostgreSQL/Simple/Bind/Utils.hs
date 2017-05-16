@@ -28,6 +28,7 @@ module Database.PostgreSQL.Simple.Bind.Utils (
     bindFunctionsFromText
   , bindFunctionsFromFile
   , bindFunctionsFromDirectory
+  , bindFunctionsFromDB
 
   , generateBindingsModule
   ) where
@@ -76,6 +77,30 @@ bindFunctionsFromDirectory bindOptions fn = do
           . mapM (bindFunctionsFromFile bindOptions)
           . filter (not . pboIgnoreFiles bindOptions)
           . fmap (fn </>)
+
+-- | Bind functions with specified name from the database.
+bindFunctionsFromDB :: PostgresBindOptions -> Connection -> String -> Q [Dec]
+bindFunctionsFromDB opt conn name = (runIO getDetails)
+  >>= fmap concat
+  . mapM (bindFunctionsFromText opt)
+  . fmap (uncurry mkDeclaration) where
+
+  getDetails :: IO [(Text, Text)]
+  getDetails = query conn sql' (Only . T.pack $ name)
+
+  sql' = [sql|
+      select pg_catalog.pg_get_function_arguments(p.oid)
+           , pg_catalog.pg_get_function_result(p.oid)
+      from pg_catalog.pg_proc p
+           left join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+      where p.proname ~ ('^('|| ? ||')$')
+        and not p.proisagg
+        and not p.proiswindow
+        and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
+    |]
+
+  mkDeclaration :: Text -> Text -> Text
+  mkDeclaration args ret = T.concat $ ["function (", args, ") returns ", ret]
 
 
 -- | Fetch function declaration(s) from database.
