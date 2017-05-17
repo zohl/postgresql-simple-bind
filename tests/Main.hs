@@ -2,6 +2,7 @@
 
 import Test.Hspec
 import Database.PostgreSQL.Simple.Bind.Representation
+import Database.PostgreSQL.Simple.Bind.Parser
 import Data.Text ()
 
 main :: IO ()

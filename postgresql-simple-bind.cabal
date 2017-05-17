@@ -55,6 +55,7 @@ library
   exposed-modules:
      Database.PostgreSQL.Simple.Bind
      Database.PostgreSQL.Simple.Bind.Common
+     Database.PostgreSQL.Simple.Bind.Parser
      Database.PostgreSQL.Simple.Bind.Representation
      Database.PostgreSQL.Simple.Bind.Types
      Database.PostgreSQL.Simple.Bind.Utils

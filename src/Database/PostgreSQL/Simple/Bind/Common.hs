@@ -26,15 +26,34 @@
 
 
 module Database.PostgreSQL.Simple.Bind.Common (
-    unwrapRow
-  , unwrapColumn
-  , PostgresBindOptions(..)
+    PostgresBindOptions(..)
+  , PostgresBindException(..)
   , ReturnType(..)
+  , unwrapColumn
+  , unwrapRow
   ) where
 
+import Control.Monad.Catch (Exception)
 import Data.Default (Default, def)
+import Data.Typeable (Typeable)
 import Database.PostgreSQL.Simple (Only(..))
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
+
+-- | The exception is thrown when something goes wrong with this package.
+data PostgresBindException
+  = ParserFailed String
+    -- ^ Thrown when parser fails to process a function
+    -- declaration. Arguments of the constructor: error message from the parser.
+  | DefaultValueNotFound String
+    -- ^ Thrown when 'Argument' expected to have default value while
+    -- it doesn't. Actually this should never happen, but we all know...
+  | RepresentationNotFound String
+    -- ^ Thrown when 'Argument' is beign printed, but representation was't
+    -- provided. Again, this should never happen.
+  deriving (Eq, Show, Typeable)
+
+instance Exception PostgresBindException
+
 
 -- | How to interpret results of function execution.
 data ReturnType
@@ -78,4 +97,3 @@ unwrapColumn = map (\(Only x) -> x)
 -- | Remove list and 'Only' constructors.
 unwrapRow :: [Only a] -> a
 unwrapRow = head . unwrapColumn
-
