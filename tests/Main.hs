@@ -1,15 +1,46 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-import Test.Hspec
-import Database.PostgreSQL.Simple.Bind.Representation
+import Control.Monad.Catch (throwM)
+import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
+import Data.Text (Text)
+import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Parser
-import Data.Text ()
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGColumn(..), PGResult(..))
+import Test.Hspec
+
+import qualified Data.Text as T
+
 
 main :: IO ()
 main = hspec spec
 
+testParser :: (Show a, Eq a) => Parser a -> Text -> a -> IO ()
+testParser p s r = either
+  (\err -> throwM . ParserFailed . concat $ ["In declaration `", T.unpack s, "`: ", err])
+  (flip shouldBe r)
+  (parseOnly (p <* endOfInput) s) where
+
 spec :: Spec
 spec = do
+
+  describe "pgResult" $ do
+    let test = testParser pgResult
+
+    it "works with simple types" $ do
+      test "bigint" $ PGSingle "bigint"
+      test "varchar" $ PGSingle "varchar"
+
+    it "works with SETOF" $ do
+      test "setof bigint" $ PGSetOf "bigint"
+      test "SETOF bigint" $ PGSetOf "bigint"
+
+    it "works with TABLE" $ do
+      test "table (x bigint, y varchar)" $ PGTable [
+          PGColumn {pgcName = "x", pgcType = "bigint"}
+        , PGColumn {pgcName = "y", pgcType = "varchar"}
+        ]
+
+
   let test = \declaration result -> parsePGFunction declaration >>= shouldBe result
 
   describe "parsePGFunction" $ do
@@ -79,25 +110,6 @@ spec = do
               PGArgument { pgaName = "x", pgaType = "bigint", pgaOptional = False }
             , PGArgument { pgaName = "y", pgaType = "bigint", pgaOptional = True }
             , PGArgument { pgaName = "z", pgaType = "bigint", pgaOptional = True }
-            ]
-        }
-
-    it "works with return value types" $ do
-      let r = PGFunction {
-          pgfSchema = ""
-        , pgfName = "f"
-        , pgfArguments = []
-        , pgfResult = PGSetOf ""
-        }
-
-      test "function f() returns setof bigint" r { pgfResult = PGSetOf "bigint" }
-
-      test "function f() returns SETOF bigint" r { pgfResult = PGSetOf "bigint" }
-
-      test "function f() returns table (x bigint, y varchar)" r {
-          pgfResult = PGTable [
-              PGColumn { pgcName = "x", pgcType = "bigint" }
-            , PGColumn { pgcName = "y", pgcType = "varchar" }
             ]
         }
 

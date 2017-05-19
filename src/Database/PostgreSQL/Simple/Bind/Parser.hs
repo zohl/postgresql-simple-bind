@@ -112,17 +112,6 @@ pgType = toLower <$> (foldr1 (<|>) $
 
 
 -- | TODO
-pgResult :: Parser PGResult
-pgResult = ss *> asciiCI "returns" *> ss *> (fmap toLower $
-      asciiCI "setof"
-  <|> asciiCI "table"
-  <|> pgType) >>= \case
-      "setof" -> (PGSetOf . unpack) <$> (ss *> pgType)
-      "table" -> PGTable <$> (ss *> char '(' *> pgColumn `sepBy` (char ',') <* ss <* char ')')
-      t       -> return $ PGSingle (unpack t)
-
-
--- | TODO
 pgColumn :: Parser PGColumn
 pgColumn = do
   pgcName <- fmap unpack $ ss *> pgIdentifier
@@ -143,6 +132,13 @@ pgArgument = do
   return PGArgument {..}
 
 
+-- | Parser for 'pg_get_function_result' output.
+pgResult :: Parser PGResult
+pgResult = (fmap toLower $ asciiCI "setof" <|> asciiCI "table" <|> pgType) >>= \case
+  "setof" -> (PGSetOf . unpack) <$> (ss *> pgType)
+  "table" -> PGTable <$> (ss *> char '(' *> pgColumn `sepBy` (char ',') <* ss <* char ')')
+  t       -> return $ PGSingle (unpack t)
+
 -- | TODO
 pgFunction :: Parser PGFunction
 pgFunction = do
@@ -150,7 +146,7 @@ pgFunction = do
   pgfSchema    <- fmap unpack $ ss *> ((pgIdentifier <* (char '.')) <|> (string ""))
   pgfName      <- fmap unpack $ ss *> pgIdentifier
   pgfArguments <- ss *> char '(' *> (pgArgument `sepBy` (char ','))
-  pgfResult    <- ss *> char ')' *> pgResult
+  pgfResult    <- ss *> char ')' *> ss *> asciiCI "returns" *> ss *> pgResult
   _            <- ss
   return PGFunction {..}
 
