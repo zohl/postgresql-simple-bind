@@ -5,21 +5,33 @@
   Maintainer:  Al Zohali <zohl@fmap.me>
   Stability:   experimental
 
-  An algebraic data type that (partially) represents function declaration based on
+  An algebraic data types that (partially) represents function declaration based on
   <http://www.postgresql.org/docs/9.5/static/sql-createfunction.html PostgreSQL documentation>.
 -}
 
 module Database.PostgreSQL.Simple.Bind.Representation (
     PGFunction(..)
   , PGArgument(..)
+  , PGArgumentMode(..)
   , PGColumn(..)
   , PGResult(..)
   ) where
 
 
+import Data.Default (Default, def)
+
+
+-- | Representation of a function argument's mode.
+data PGArgumentMode = In | Out | InOut | Variadic deriving (Show, Eq)
+
+instance Default PGArgumentMode where
+  def = In
+
+
 -- | Representation of a function's argument.
 data PGArgument = PGArgument {
-    pgaName     :: String
+    pgaMode     :: PGArgumentMode
+  , pgaName     :: String
   , pgaType     :: String
   , pgaOptional :: Bool
   } deriving (Show, Eq)

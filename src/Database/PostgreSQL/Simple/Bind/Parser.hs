@@ -32,6 +32,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgResult
   , pgColumn
   , pgArgument
+  , pgArgumentMode
   , pgFunction
   ) where
 
@@ -39,10 +40,11 @@ module Database.PostgreSQL.Simple.Bind.Parser (
 import Control.Applicative ((*>), (<*), (<|>))
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Data.Attoparsec.Text (Parser, char, string, decimal, skipSpace, asciiCI, sepBy)
-import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, takeTill, inClass)
+import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, takeTill, inClass, space)
+import Data.Default (def)
 import Data.Text (Text, toLower, unpack, append, length)
 import Prelude hiding (takeWhile, length)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGColumn(..), PGResult(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..))
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 
 
@@ -118,10 +120,19 @@ pgColumn = do
   pgcType <- fmap unpack $ ss *> pgType <* ss
   return PGColumn {..}
 
+-- | Parser for argument mode.
+pgArgumentMode :: Parser PGArgumentMode
+pgArgumentMode =
+      (asciiCI "inout"    *> space *> return InOut)
+  <|> (asciiCI "in"       *> space *> return In)
+  <|> (asciiCI "out"      *> space *> return Out)
+  <|> (asciiCI "variadic" *> space *> return Variadic)
+  <|> (return def)
 
--- | TODO
+-- | Parser for a single argument in a function declaration.
 pgArgument :: Parser PGArgument
 pgArgument = do
+  pgaMode     <- pgArgumentMode
   pgaName     <- fmap unpack $ ss *> pgIdentifier
   pgaType     <- fmap unpack $ ss *> pgType
   pgaOptional <- fmap (( > 0) . length) $ ss *> (

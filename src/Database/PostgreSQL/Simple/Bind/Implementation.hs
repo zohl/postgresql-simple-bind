@@ -265,10 +265,10 @@ unwrapE _   (PGTable _)     q = unwrapE' AsRow q
 
 
 wrapArg :: PostgresBindOptions -> PGArgument -> Name -> Exp
-wrapArg (PostgresBindOptions {..}) (PGArgument n t d) argName = foldl1 AppE $ [
-    ConE $ if d then 'OptionalArg else 'MandatoryArg
-  , LitE $ StringL n
-  , LitE $ StringL t
+wrapArg PostgresBindOptions {..} PGArgument {..} argName = foldl1 AppE $ [
+    ConE $ if pgaOptional then 'OptionalArg else 'MandatoryArg
+  , LitE $ StringL pgaName
+  , LitE $ StringL pgaType
   , if pboDebugQueries
       then foldr1 AppE [ConE 'Just, VarE 'show, VarE argName]
       else ConE 'Nothing
