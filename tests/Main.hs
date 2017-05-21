@@ -46,17 +46,22 @@ spec = do
     let test = testParser pgArgument
 
     it "works with simple arguments" $ do
-      test "x bigint"  $ PGArgument { pgaMode = def, pgaName = "x", pgaType = "bigint",  pgaOptional = False }
-      test "y varchar" $ PGArgument { pgaMode = def, pgaName = "y", pgaType = "varchar", pgaOptional = False }
-      test "Z VARCHAR" $ PGArgument { pgaMode = def, pgaName = "z", pgaType = "varchar", pgaOptional = False }
+      test "x bigint"  $ PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint",  pgaOptional = False }
+      test "y varchar" $ PGArgument { pgaMode = def, pgaName = Just "y", pgaType = "varchar", pgaOptional = False }
+      test "Z VARCHAR" $ PGArgument { pgaMode = def, pgaName = Just "z", pgaType = "varchar", pgaOptional = False }
 
     it "works with argument modes" $ do
-      let r = PGArgument { pgaMode = def, pgaName = "x", pgaType = "bigint",  pgaOptional = False }
+      let r = PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint",  pgaOptional = False }
       test "in x bigint"       $ r {pgaMode = In}
       test "out x bigint"      $ r {pgaMode = Out}
       test "inout x bigint"    $ r {pgaMode = InOut}
       test "variadic x bigint" $ r {pgaMode = Variadic}
 
+    it "works with nameless arguments" $ do
+      let r = PGArgument { pgaMode = def, pgaName = Nothing, pgaType = "",  pgaOptional = False }
+      test "bigint"                            $ r {pgaType = "bigint"}
+      test "out varchar"                       $ r {pgaMode = Out, pgaType = "varchar"}
+      test "variadic timestamp with time zone" $ r {pgaMode = Variadic, pgaType = "timestamp with time zone"}
 
   let test = \declaration result -> parsePGFunction declaration >>= shouldBe result
 

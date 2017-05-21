@@ -31,7 +31,7 @@ instance Default PGArgumentMode where
 -- | Representation of a function's argument.
 data PGArgument = PGArgument {
     pgaMode     :: PGArgumentMode
-  , pgaName     :: String
+  , pgaName     :: Maybe String
   , pgaType     :: String
   , pgaOptional :: Bool
   } deriving (Show, Eq)

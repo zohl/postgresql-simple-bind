@@ -133,7 +133,7 @@ pgArgumentMode =
 pgArgument :: Parser PGArgument
 pgArgument = do
   pgaMode     <- pgArgumentMode
-  pgaName     <- fmap unpack $ ss *> pgIdentifier
+  pgaName     <- fmap (Just . unpack) $ ss *> pgIdentifier -- TODO: temporary hack to make it work
   pgaType     <- fmap unpack $ ss *> pgType
   pgaOptional <- fmap (( > 0) . length) $ ss *> (
           (asciiCI "default" <|> string "=") *> (takeTill (inClass ",)"))

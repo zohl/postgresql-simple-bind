@@ -35,7 +35,7 @@ module Database.PostgreSQL.Simple.Bind.Implementation (
 import Control.Exception (throw)
 import Debug.Trace (traceIO)
 import Data.List (intersperse)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromJust)
 import Database.PostgreSQL.Simple (Connection, query, query_)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..))
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..), PostgresBindOptions(..), ReturnType(..), unwrapRow, unwrapColumn)
@@ -267,7 +267,7 @@ unwrapE _   (PGTable _)     q = unwrapE' AsRow q
 wrapArg :: PostgresBindOptions -> PGArgument -> Name -> Exp
 wrapArg PostgresBindOptions {..} PGArgument {..} argName = foldl1 AppE $ [
     ConE $ if pgaOptional then 'OptionalArg else 'MandatoryArg
-  , LitE $ StringL pgaName
+  , LitE $ StringL $ fromJust pgaName
   , LitE $ StringL pgaType
   , if pboDebugQueries
       then foldr1 AppE [ConE 'Just, VarE 'show, VarE argName]
@@ -329,4 +329,3 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
         ] ++ (maybe [] (\name -> return $ ValD (VarP name) (NormalB argsExpr) []) argsName)
 
   return $ FunD funcName [Clause funcArgs funcBody funcDecl]
-
