@@ -8,7 +8,6 @@ import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..))
 import Test.Hspec
-
 import qualified Data.Text as T
 
 
@@ -78,7 +77,7 @@ spec = do
           pgfName = "f"
         , pgfResult = PGSingle "bigint"
         , pgfArguments = [
-              PGArgument { pgaMode = def, pgaName = "x", pgaType = "bigint", pgaOptional = False }
+              PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint", pgaOptional = False }
             ]
         }
 
@@ -100,22 +99,22 @@ spec = do
 
       test "function f(x bigint default 0::bigint) returns void" r {
           pgfArguments = [
-              PGArgument { pgaMode = def, pgaName = "x", pgaType = "bigint", pgaOptional = True }
+              PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint", pgaOptional = True }
             ]
         }
 
       test "function f(x bigint, y bigint default 0::bigint) returns void" r {
           pgfArguments = [
-              PGArgument { pgaMode = def, pgaName = "x", pgaType = "bigint", pgaOptional = False }
-            , PGArgument { pgaMode = def, pgaName = "y", pgaType = "bigint", pgaOptional = True }
+              PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint", pgaOptional = False }
+            , PGArgument { pgaMode = def, pgaName = Just "y", pgaType = "bigint", pgaOptional = True }
             ]
         }
 
       test "function f(x bigint, y bigint = 0::bigint, z bigint = 0::bigint) returns void" r {
           pgfArguments = [
-              PGArgument { pgaMode = def, pgaName = "x", pgaType = "bigint", pgaOptional = False }
-            , PGArgument { pgaMode = def, pgaName = "y", pgaType = "bigint", pgaOptional = True }
-            , PGArgument { pgaMode = def, pgaName = "z", pgaType = "bigint", pgaOptional = True }
+              PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint", pgaOptional = False }
+            , PGArgument { pgaMode = def, pgaName = Just "y", pgaType = "bigint", pgaOptional = True }
+            , PGArgument { pgaMode = def, pgaName = Just "z", pgaType = "bigint", pgaOptional = True }
             ]
         }
 
@@ -140,7 +139,7 @@ spec = do
       , pgfResult = PGSingle "void"
       }
 
-    let x = PGArgument { pgaMode = def, pgaName = "x", pgaType = "", pgaOptional = False }
+    let x = PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "", pgaOptional = False }
 
     it "works for multiple word types" $ do
       test "function f(x double precision) returns void" r {

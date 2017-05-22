@@ -107,17 +107,17 @@ bindFunctionsFromDB opt conn name = (runIO getDetails)
 getFunctionDeclaration :: Connection -> String -> IO [String]
 getFunctionDeclaration conn name = unwrapColumn <$> query conn sql' (Only $ T.pack name) where
   sql' = [sql|
-      select 'function '
-          || p.proname
-          || '('||pg_catalog.pg_get_function_arguments(p.oid)||')'
-          || ' returns '||pg_catalog.pg_get_function_result(p.oid)
-      from pg_catalog.pg_proc p
-           left join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-      where p.proname ~ ('^('|| ? ||')$')
-        and not p.proisagg
-        and not p.proiswindow
-        and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
-    |]
+    select 'function '
+        || p.proname
+        || '('||pg_catalog.pg_get_function_arguments(p.oid)||')'
+        || ' returns '||pg_catalog.pg_get_function_result(p.oid)
+    from pg_catalog.pg_proc p
+         left join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+    where p.proname ~ ('^('|| ? ||')$')
+      and not p.proisagg
+      and not p.proiswindow
+      and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
+  |]
 
 -- | Generate module with bindings.
 generateBindingsModule
@@ -132,7 +132,7 @@ generateBindingsModule conn opt name ns = do
   let (optPath, optName) = (reverse *** (reverse . drop 1)) . span (/= '.') . reverse $ opt
   let mkList = concat . ("    " :) . intersperse "\n  , "
 
-  return $ concat $ [
+  return . concat $ [
       [str| -- This module was automatically generated. Do not edit it.
       |
       |{-# LANGUAGE DataKinds         #-}

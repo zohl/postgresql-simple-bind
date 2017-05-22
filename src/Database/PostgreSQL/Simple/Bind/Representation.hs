@@ -9,6 +9,9 @@
   <http://www.postgresql.org/docs/9.5/static/sql-createfunction.html PostgreSQL documentation>.
 -}
 
+{-# LANGUAGE DeriveLift #-}
+
+
 module Database.PostgreSQL.Simple.Bind.Representation (
     PGFunction(..)
   , PGArgument(..)
@@ -19,10 +22,10 @@ module Database.PostgreSQL.Simple.Bind.Representation (
 
 
 import Data.Default (Default, def)
-
+import Language.Haskell.TH.Syntax (Lift)
 
 -- | Representation of a function argument's mode.
-data PGArgumentMode = In | Out | InOut | Variadic deriving (Show, Eq)
+data PGArgumentMode = In | Out | InOut | Variadic deriving (Show, Eq, Lift)
 
 instance Default PGArgumentMode where
   def = In
@@ -34,7 +37,7 @@ data PGArgument = PGArgument {
   , pgaName     :: Maybe String
   , pgaType     :: String
   , pgaOptional :: Bool
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Lift)
 
 -- | Representation of a PostrgeSQL function signature (schema, name, arguments, result).
 data PGFunction = PGFunction {
