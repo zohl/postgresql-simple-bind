@@ -35,9 +35,9 @@ module Database.PostgreSQL.Simple.Bind.Common (
 
 import Control.Monad.Catch (Exception)
 import Data.Default (Default, def)
-import Data.Typeable (Typeable)
 import Database.PostgreSQL.Simple (Only(..))
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
+import Data.Typeable (Typeable)
 
 -- | The exception is thrown when something goes wrong with this package.
 data PostgresBindException
@@ -48,8 +48,13 @@ data PostgresBindException
     -- ^ Thrown when 'Argument' expected to have default value while
     -- it doesn't. Actually this should never happen, but we all know...
   | RepresentationNotFound String
-    -- ^ Thrown when 'Argument' is beign printed, but representation was't
+    -- ^ Thrown when 'Argument' is being printed, but representation was't
     -- provided. Again, this should never happen.
+  | IncorrectInvocation String
+    -- ^ Thrown when function is called with wrong combination of
+    -- non-default values. More precisely, supplying default value to named
+    -- argument and then supplying non-default value to positional argument
+    -- is not allowed.
   deriving (Eq, Show, Typeable)
 
 instance Exception PostgresBindException

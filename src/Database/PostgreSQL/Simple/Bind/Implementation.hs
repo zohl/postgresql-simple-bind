@@ -32,8 +32,8 @@ module Database.PostgreSQL.Simple.Bind.Implementation (
   , PostgresType
   ) where
 
-import Control.Arrow (first)
 import Control.Exception (throw)
+import Control.Monad.Catch (MonadThrow, throwM)
 import Debug.Trace (traceIO)
 import Data.List (intersperse)
 import Data.Monoid ((<>), mconcat)
@@ -270,25 +270,31 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
 
   let funcDecl = [
           ValD (VarP argsName)
-          (NormalB . ListE $ zipWith (wrapArg opt) pgfArguments varNames) []
+          (NormalB . ListE $ zipWith (wrapArg opt) pgfArguments varNames) []]
 
-        , ValD (TupP [VarP sqlQueryName, VarP refinedArgsName])
-          (NormalB $ (VarE 'prepareQuery)
-           `AppE` (LitE . StringL $ queryPrefix opt f)
-           `AppE` specs
-           `AppE` (VarE argsName)) []]
+  let traceQuery = NoBindS
+        <$> if pboDebugQueries
+            then (traceE $ VarE sqlQueryName):
+                 (if null varNames then [] else [traceE $ VarE argsName])
+            else []
 
-  let funcBody = NormalB $ if pboDebugQueries
-        then DoE $ NoBindS <$> (traceQuery ++ [execQuery])
-        else execQuery where
+  let queryBindings = BindS
+        (TupP [VarP sqlQueryName, VarP refinedArgsName])
+        ((VarE 'prepareQuery)
+          `AppE` (LitE . StringL $ queryPrefix opt f)
+          `AppE` specs
+          `AppE` (VarE argsName))
 
-          isNullE = AppE (VarE 'null)
+  let execQuery = NoBindS $ unwrapE opt pgfResult $ CondE ((VarE 'null) `AppE` (VarE refinedArgsName))
+        ((VarE 'query_)
+          `AppE` (VarE connName)
+          `AppE` (VarE sqlQueryName))
+        ((VarE 'query)
+          `AppE` (VarE connName)
+          `AppE` (VarE sqlQueryName)
+          `AppE` (VarE refinedArgsName))
 
-          execQuery = unwrapE opt pgfResult $ CondE (isNullE $ VarE refinedArgsName)
-            ((VarE 'query_) `AppE` (VarE connName) `AppE` (VarE sqlQueryName))
-            ((VarE 'query)  `AppE` (VarE connName) `AppE` (VarE sqlQueryName) `AppE` (VarE refinedArgsName))
-
-          traceQuery = (traceE $ VarE sqlQueryName):(if null varNames then [] else [traceE $ VarE argsName])
+  let funcBody = NormalB . DoE $ queryBindings:(concat [traceQuery, [execQuery]])
 
   return $ FunD funcName [Clause funcArgs funcBody funcDecl]
 
@@ -312,22 +318,22 @@ queryPrefix PostgresBindOptions {..} PGFunction {..} = select ++ " " ++ function
 -- - type casting
 -- - (=>) (:=)
 -- - throwing exception
-prepareQuery :: Builder -> [PGArgument] -> [Argument] -> (Query, [Argument])
-prepareQuery prefix specs args = (Query . BS.toStrict . toLazyByteString $ sqlQuery, refinedArgs) where
-  sqlQuery = prefix <> char8 '(' <> argsString <> char8 ')'
+runFormatter :: (MonadThrow m) => Bool -> [(PGArgument, Argument)] -> m [(Builder, Argument)]
+runFormatter _ [] = return []
+runFormatter o ((PGArgument {..}, arg):rest) = case arg of
+  MandatoryArg {..} -> ((char8 '?', arg):) <$> (runFormatter o rest)
+  OptionalArg  {..} -> case morgValue of
+    Nothing  -> runFormatter True rest
+    (Just _) -> case pgaName of
+      Nothing -> if o
+        then throwM (IncorrectInvocation "") -- . BSC8.unpack . BS.toStrict . toLazyByteString $ prefix)
+        else ((char8 '?', arg):) <$> (runFormatter o rest)
+      (Just name) -> (((byteString . BSC8.pack $ name) <> byteString " => ?", arg):) <$> (runFormatter o rest)
 
-  (argsString, refinedArgs) = first (mconcat . intersperse (char8 ',')) . unzip
-    $ runFormatter False
-    $ zip specs args
 
-  runFormatter _ [] = []
-  runFormatter o ((PGArgument {..}, arg):rest) = case arg of
-    MandatoryArg {..} -> (char8 '?', arg):(runFormatter o rest)
-    OptionalArg  {..} -> case morgValue of
-      Nothing  -> runFormatter True rest
-      (Just _) -> case pgaName of
-        Nothing -> if o
-          then error "TODO: this combination is not allowed"
-          else (char8 '?', arg):(runFormatter o rest)
-        (Just name) -> ((byteString . BSC8.pack $ name) <> byteString " => ?", arg):(runFormatter o rest)
-
+prepareQuery :: (MonadThrow m) => Builder -> [PGArgument] -> [Argument] -> m (Query, [Argument])
+prepareQuery prefix specs args = do
+  (argsString, refinedArgs) <- unzip <$> runFormatter False (zip specs args)
+  let sqlQuery = mconcat [
+          prefix, char8 '(', mconcat . intersperse (char8 ',') $ argsString, char8 ')']
+  return (Query . BS.toStrict . toLazyByteString $ sqlQuery, refinedArgs)
