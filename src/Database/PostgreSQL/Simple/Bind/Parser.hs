@@ -14,6 +14,7 @@
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE TupleSections              #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Representation
@@ -38,15 +39,17 @@ module Database.PostgreSQL.Simple.Bind.Parser (
 
 
 import Control.Applicative ((*>), (<*), (<|>))
+import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow(..), throwM)
+import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, decimal, skipSpace, asciiCI, sepBy)
-import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, takeTill, inClass, space)
+import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar)
 import Data.Default (def)
-import Data.Text (Text, toLower, unpack, append, length)
+import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..))
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
-
+import qualified Data.Text as T
 
 ss :: Parser ()
 ss = skipSpace
@@ -56,12 +59,12 @@ pgIdentifier :: Parser Text
 pgIdentifier = do
   s1 <- takeWhile1 (inClass "a-zA-Z_")
   s2 <- takeWhile (inClass "a-zA-Z_0-9$")
-  return $ toLower $ s1 `append` s2
+  return $ T.toLower $ s1 <> s2
 
 
 -- | TODO
 pgType :: Parser Text
-pgType = toLower <$> (foldr1 (<|>) $
+pgType = T.toLower <$> (foldr1 (<|>) $
      (map asciiCI [ "double precision" ])
   ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 1))) ["bit", "character varying"])
   ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 2))) ["numeric", "decimal"])
@@ -73,7 +76,7 @@ pgType = toLower <$> (foldr1 (<|>) $
     tz <- ss *> ((asciiCI "with time zone") <|> (asciiCI "without time zone") <|> (string ""))
     return $ case tz of
       "" -> base
-      _  -> base `append` " " `append` tz
+      _  -> base <> " " <> tz
 
   intervalType = do
     base <- (asciiCI "interval") <* ss
@@ -96,7 +99,7 @@ pgType = toLower <$> (foldr1 (<|>) $
 
     return $ case fields of
       "" -> base
-      _  -> base `append` " " `append` fields
+      _  -> base <> " " <> fields
 
 
   modifiers limit = (char '(') *> exact <* (char ')') <|> less where
@@ -116,8 +119,8 @@ pgType = toLower <$> (foldr1 (<|>) $
 -- | TODO
 pgColumn :: Parser PGColumn
 pgColumn = do
-  pgcName <- fmap unpack $ ss *> pgIdentifier
-  pgcType <- fmap unpack $ ss *> pgType <* ss
+  pgcName <- fmap T.unpack $ ss *> pgIdentifier
+  pgcType <- fmap T.unpack $ ss *> pgType <* ss
   return PGColumn {..}
 
 -- | Parser for argument mode.
@@ -129,33 +132,46 @@ pgArgumentMode =
   <|> (asciiCI "variadic" *> space *> return Variadic)
   <|> (return def)
 
+
+-- | Parser for an expression (as a default value for an argument).
+-- WARNING: parsing default values requires ability to parse almost arbitraty expressions.
+-- Here is a quick and dirty implementation of the parser.
+pgExpression :: Parser Text
+pgExpression = ss *> takeWhile (not . inClass ",)")
+
+
 -- | Parser for a single argument in a function declaration.
 pgArgument :: Parser PGArgument
 pgArgument = do
-  pgaMode     <- pgArgumentMode
-  pgaName     <- fmap (Just . unpack) $ ss *> pgIdentifier -- TODO: temporary hack to make it work
-  pgaType     <- fmap unpack $ ss *> pgType
-  pgaOptional <- fmap (( > 0) . length) $ ss *> (
-          (asciiCI "default" <|> string "=") *> (takeTill (inClass ",)"))
-      <|> (string ""))
-  -- WARNING: parsing default values requires ability to parse almost arbitraty expressions.
-  -- Here is a quick and dirty implementation of the parser.
-  return PGArgument {..}
+  pgaMode <- ss *> pgArgumentMode
+  (pgaName, pgaType, pgaOptional) <-
+        (,,) <$> (ss *> pgArgumentName) <*> (ss *> pgArgumentType) <*> (ss *> pgOptional)
+    <|> (,,) <$> (return Nothing)       <*> (ss *> pgArgumentType) <*> (ss *> pgOptional)
+  return PGArgument {..} where
 
+    pgArgumentName = fmap (Just . T.unpack) $ ss *> pgIdentifier
+
+    pgArgumentType = fmap T.unpack $ ss *> pgType
+
+    pgOptional = ss *> (
+          ((asciiCI "default" <|> string "=") *> ((not . T.null) <$> pgExpression))
+      <|> (peekChar >>= \mc -> do
+              when (maybe False (not . inClass ",)") mc) $ fail "TODO"
+              return False))
 
 -- | Parser for 'pg_get_function_result' output.
 pgResult :: Parser PGResult
-pgResult = (fmap toLower $ asciiCI "setof" <|> asciiCI "table" <|> pgType) >>= \case
-  "setof" -> (PGSetOf . unpack) <$> (ss *> pgType)
+pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> pgType) >>= \case
+  "setof" -> (PGSetOf . T.unpack) <$> (ss *> pgType)
   "table" -> PGTable <$> (ss *> char '(' *> pgColumn `sepBy` (char ',') <* ss <* char ')')
-  t       -> return $ PGSingle (unpack t)
+  t       -> return $ PGSingle (T.unpack t)
 
 -- | TODO
 pgFunction :: Parser PGFunction
 pgFunction = do
   _            <- asciiCI "function"
-  pgfSchema    <- fmap unpack $ ss *> ((pgIdentifier <* (char '.')) <|> (string ""))
-  pgfName      <- fmap unpack $ ss *> pgIdentifier
+  pgfSchema    <- fmap T.unpack $ ss *> ((pgIdentifier <* (char '.')) <|> (string ""))
+  pgfName      <- fmap T.unpack $ ss *> pgIdentifier
   pgfArguments <- ss *> char '(' *> (pgArgument `sepBy` (char ','))
   pgfResult    <- ss *> char ')' *> ss *> asciiCI "returns" *> ss *> pgResult
   _            <- ss
@@ -165,6 +181,6 @@ pgFunction = do
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.
 parsePGFunction :: (MonadThrow m) => Text -> m PGFunction
 parsePGFunction s = either
-  (\err -> throwM . ParserFailed . concat $ ["In declaration `", unpack s, "`: ", err])
+  (\err -> throwM . ParserFailed . concat $ ["In declaration `", T.unpack s, "`: ", err])
   return
   (parseOnly (ss *> pgFunction) s) where

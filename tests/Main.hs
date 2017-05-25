@@ -37,13 +37,11 @@ spec = do
     it "works with TABLE" $ do
       test "table (x bigint, y varchar)" $ PGTable [
           PGColumn {pgcName = "x", pgcType = "bigint"}
-        , PGColumn {pgcName = "y", pgcType = "varchar"}
-        ]
+        , PGColumn {pgcName = "y", pgcType = "varchar"}]
 
 
   describe "pgArgument" $ do
     let test = testParser pgArgument
-
     it "works with simple arguments" $ do
       test "x bigint"  $ PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint",  pgaOptional = False }
       test "y varchar" $ PGArgument { pgaMode = def, pgaName = Just "y", pgaType = "varchar", pgaOptional = False }
@@ -56,11 +54,22 @@ spec = do
       test "inout x bigint"    $ r {pgaMode = InOut}
       test "variadic x bigint" $ r {pgaMode = Variadic}
 
-    it "works with nameless arguments" $ do
+    it "works with positional arguments" $ do
       let r = PGArgument { pgaMode = def, pgaName = Nothing, pgaType = "",  pgaOptional = False }
       test "bigint"                            $ r {pgaType = "bigint"}
       test "out varchar"                       $ r {pgaMode = Out, pgaType = "varchar"}
       test "variadic timestamp with time zone" $ r {pgaMode = Variadic, pgaType = "timestamp with time zone"}
+
+    it "works with different combinations of optional elements" $ do
+      let r = PGArgument { pgaMode = def, pgaName = Nothing, pgaType = "timestamp with time zone", pgaOptional = False }
+      test "inout foo timestamp with time zone default current_timestamp" r {pgaMode = InOut, pgaName = Just "foo", pgaOptional = True}
+      test "inout foo timestamp with time zone"                           r {pgaMode = InOut, pgaName = Just "foo"}
+      test "inout     timestamp with time zone default current_timestamp" r {pgaMode = InOut, pgaOptional = True}
+      test "inout     timestamp with time zone"                           r {pgaMode = InOut}
+      test "      foo timestamp with time zone default current_timestamp" r {pgaName = Just "foo", pgaOptional = True}
+      test "      foo timestamp with time zone"                           r {pgaName = Just "foo"}
+      test "          timestamp with time zone default current_timestamp" r {pgaOptional = True}
+      test "          timestamp with time zone"                           r
 
   let test = \declaration result -> parsePGFunction declaration >>= shouldBe result
 
@@ -226,4 +235,3 @@ spec = do
       test "function f(x interval minute to second (4)) returns void" r {
           pgfArguments = [ x { pgaType = "interval minute to second" } ]
         }
-
