@@ -38,12 +38,12 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   ) where
 
 
-import Control.Applicative ((*>), (<*), (<|>))
+import Control.Applicative ((*>), (<*), (<|>), liftA2)
 import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, decimal, skipSpace, asciiCI, sepBy)
-import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar)
+import Data.Attoparsec.Text (takeWhile, parseOnly, inClass, space, peekChar, satisfy, anyChar)
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
@@ -54,12 +54,26 @@ import qualified Data.Text as T
 ss :: Parser ()
 ss = skipSpace
 
--- | TODO
+-- | Parser for a generic identifier.
 pgIdentifier :: Parser Text
-pgIdentifier = do
-  s1 <- takeWhile1 (inClass "a-zA-Z_")
-  s2 <- takeWhile (inClass "a-zA-Z_0-9$")
-  return $ T.toLower $ s1 <> s2
+pgIdentifier = pgQuotedIdentifier <|> pgNormalIdentifier where
+  pgNormalIdentifier = T.toLower <$> liftA2 T.cons
+    (satisfy $ inClass "a-zA-Z_")
+    (takeWhile $ inClass "a-zA-Z0-9_$")
+
+  quote = '"'
+
+  pgQuotedIdentifier = do
+    (s, mc) <- (,)
+      <$> (liftA2 (<>) pgQuotedIdentifier' (T.singleton <$> anyChar))
+      <*> peekChar
+    case mc of
+      Nothing -> return s
+      Just c  -> if c == quote
+                 then liftA2 (<>) (return s) pgQuotedIdentifier
+                 else return s
+
+  pgQuotedIdentifier' = T.cons <$> (char '"') <*> (takeWhile (/= '"'))
 
 
 -- | TODO

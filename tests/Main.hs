@@ -71,6 +71,24 @@ spec = do
       test "          timestamp with time zone default current_timestamp" r {pgaOptional = True}
       test "          timestamp with time zone"                           r
 
+
+  describe "pgIdentifier" $ do
+    let test = testParser pgIdentifier
+    it "works with simple identifiers" $ do
+      test "foo"     $ "foo"
+      test "_bar123" $ "_bar123"
+      test "baz$$$"  $ "baz$$$"
+
+    it "converts to lower case normal identifiers" $ do
+      test "Qux"  $ "qux"
+      test "QUUX" $ "quux"
+
+    it "works with quoted identifiers" $ do
+      test "\"Corge\""         $ "\"Corge\""
+      test "\"Grault\"\"123\"" $ "\"Grault\"\"123\""
+      test "\"Waldo !@ #$\""   $ "\"Waldo !@ #$\""
+
+
   let test = \declaration result -> parsePGFunction declaration >>= shouldBe result
 
   describe "parsePGFunction" $ do
