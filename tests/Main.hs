@@ -89,6 +89,44 @@ spec = do
       test "\"Waldo !@ #$\""   $ "\"Waldo !@ #$\""
 
 
+  describe "pgType" $ do
+    let test = testParser pgType
+
+    it "works with simple type names" $ do
+      test "varchar"   ("varchar"  , Nothing)
+      test "bigint"    ("bigint"   , Nothing)
+      test "timestamp" ("timestamp", Nothing)
+
+    it "works with multiword type names" $ do
+      test "double precision"         ("double precision"        , Nothing)
+      test "character varying"        ("character varying"       , Nothing)
+      test "timestamp with time zone" ("timestamp with time zone", Nothing)
+
+    it "works with types with modifiers" $ do
+      test "varchar(256)"            ("varchar"          , Just "256")
+      test "numeric(10)"             ("numeric"          , Just "10")
+      test "numeric(10,3)"           ("numeric"          , Just "10,3")
+      test "character varying(1024)" ("character varying", Just "1024")
+
+    it "works with time types" $ do
+      test "time"                     ("time"                    , Nothing)
+      test "time (6)"                 ("time"                    , Just "6")
+      test "time (6) with time zone"  ("time with time zone"     , Just "6")
+      test "time with time zone"      ("time with time zone"     , Nothing)
+      test "time without time zone"   ("time without time zone"  , Nothing)
+      test "timestamp with time zone" ("timestamp with time zone", Nothing)
+      test "timestamptz"              ("timestamptz"             , Nothing)
+
+    it "works for intervals" $ do
+      test "interval"                       ("interval"                 , Nothing)
+      test "interval month"                 ("interval month"           , Nothing)
+      test "interval minute to second (4)"  ("interval minute to second", Just "4")
+
+    it "works with user-defined types" $ do
+      test "t_custom_type"           ("t_custom_type", Nothing)
+      test "t_custom_type (1,2,3,4)" ("t_custom_type", Just "1,2,3,4")
+
+
   let test = \declaration result -> parsePGFunction declaration >>= shouldBe result
 
   describe "parsePGFunction" $ do
@@ -156,100 +194,3 @@ spec = do
       test "function public.f() returns bigint" r { pgfSchema = "public" }
 
       test "function Test.f() returns bigint" r { pgfSchema = "test" }
-
-
-  describe "parsing a function with specific type" $ do
-    let r = PGFunction {
-        pgfSchema = ""
-      , pgfName = "f"
-      , pgfArguments = []
-      , pgfResult = PGSingle "void"
-      }
-
-    let x = PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "", pgaOptional = False }
-
-    it "works for multiple word types" $ do
-      test "function f(x double precision) returns void" r {
-          pgfArguments = [ x { pgaType = "double precision" } ]
-        }
-
-    it "works for types with precisions" $ do
-      test "function f(x bit) returns void" r {
-          pgfArguments = [ x { pgaType = "bit" } ]
-        }
-
-      test "function f(x bit (32)) returns void" r {
-          pgfArguments = [ x { pgaType = "bit" } ]
-        }
-
-
-    it "works for types with precisions and multiple words" $ do
-      test "function f(x character varying) returns void" r {
-          pgfArguments = [ x { pgaType = "character varying" } ]
-        }
-
-      test "function f(x character varying (256)) returns void" r {
-          pgfArguments = [ x { pgaType = "character varying" } ]
-        }
-
-
-    it "works for types with multiple precisions" $ do
-      test "function f(x numeric) returns void" r {
-          pgfArguments = [ x { pgaType = "numeric" } ]
-        }
-
-      test "function f(x numeric(10)) returns void" r {
-          pgfArguments = [ x { pgaType = "numeric" } ]
-        }
-
-      test "function f(x numeric(10,3)) returns void" r {
-          pgfArguments = [ x { pgaType = "numeric" } ]
-        }
-
-      test "function f(x user_defined_type(1,2,3,4)) returns void" r {
-          pgfArguments = [ x { pgaType = "user_defined_type" } ]
-        }
-
-
-    it "works for time types" $ do
-      test "function f(x time) returns void" r {
-          pgfArguments = [ x { pgaType = "time" } ]
-        }
-
-      test "function f(x time (6)) returns void" r {
-          pgfArguments = [ x { pgaType = "time" } ]
-        }
-
-      test "function f(x time (6) with time zone) returns void" r {
-          pgfArguments = [ x { pgaType = "time with time zone" } ]
-        }
-
-      test "function f(x time with time zone) returns void" r {
-          pgfArguments = [ x { pgaType = "time with time zone" } ]
-        }
-
-      test "function f(x time without time zone) returns void" r {
-          pgfArguments = [ x { pgaType = "time without time zone" } ]
-        }
-
-      test "function f(x timestamp with time zone) returns void" r {
-          pgfArguments = [ x { pgaType = "timestamp with time zone" } ]
-        }
-
-      test "function f(x timestamptz) returns void" r {
-          pgfArguments = [ x { pgaType = "timestamptz" } ]
-        }
-
-
-    it "works for intervals" $ do
-      test "function f(x interval) returns void" r {
-          pgfArguments = [ x { pgaType = "interval" } ]
-        }
-
-      test "function f(x interval month) returns void" r {
-          pgfArguments = [ x { pgaType = "interval month" } ]
-        }
-
-      test "function f(x interval minute to second (4)) returns void" r {
-          pgfArguments = [ x { pgaType = "interval minute to second" } ]
-        }

@@ -42,8 +42,8 @@ import Control.Applicative ((*>), (<*), (<|>), liftA2)
 import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Data.Monoid ((<>))
-import Data.Attoparsec.Text (Parser, char, string, decimal, skipSpace, asciiCI, sepBy)
-import Data.Attoparsec.Text (takeWhile, parseOnly, inClass, space, peekChar, satisfy, anyChar)
+import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy)
+import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
@@ -76,68 +76,62 @@ pgIdentifier = pgQuotedIdentifier <|> pgNormalIdentifier where
   pgQuotedIdentifier' = T.cons <$> (char '"') <*> (takeWhile (/= '"'))
 
 
--- | TODO
-pgType :: Parser Text
-pgType = T.toLower <$> (foldr1 (<|>) $
-     (map asciiCI [ "double precision" ])
-  ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 1))) ["bit", "character varying"])
-  ++ (map (\t -> (asciiCI t <* ss <* (modifiers $ Just 2))) ["numeric", "decimal"])
-  ++ ((asciiCI "timestamptz"):(map timeType ["timestamp", "time"]))
-  ++ [intervalType, pgIdentifier <* (modifiers Nothing)]) where
+-- | Parser for a type.
+pgType :: Parser (Text, Maybe Text)
+pgType = pgTime <|> (liftA2 (,) pgTypeName (ss *> pgTypeModifier)) where
 
-  timeType t = do
-    base <- asciiCI t <* ss <* (modifiers $ Just 1)
-    tz <- ss *> ((asciiCI "with time zone") <|> (asciiCI "without time zone") <|> (string ""))
-    return $ case tz of
-      "" -> base
-      _  -> base <> " " <> tz
+  pgTypeName :: Parser Text
+  pgTypeName = pgInterval
+           <|> asciiCI "double precision"
+           <|> asciiCI "bit varying"
+           <|> asciiCI "character varying"
+           <|> pgIdentifier
 
-  intervalType = do
-    base <- (asciiCI "interval") <* ss
-    fields <- foldr1 (<|>) $ map asciiCI [
-        "year to month"
-      , "day to hour"
-      , "day to minute"
-      , "day to second"
-      , "hour to minute"
-      , "hour to second"
-      , "minute to second"
-      , "year"
-      , "month"
-      , "day"
-      , "hour"
-      , "minute"
-      , "second"
-      , ""]
-    _ <- ss *> (modifiers $ Just 1)
-
-    return $ case fields of
-      "" -> base
-      _  -> base <> " " <> fields
+  pgTypeModifier :: Parser (Maybe Text)
+  pgTypeModifier = ((char '(') *> (Just <$> pgTypeModifier') <* (char ')'))
+               <|> return Nothing where
+    pgTypeModifier' = takeWhile1 (/= ')')  -- TODO: can be arbitrary string or identifier
 
 
-  modifiers limit = (char '(') *> exact <* (char ')') <|> less where
-    exact = ($ limit) $ maybe
-      ((modifier `sepBy` (char ',')) *> (string ""))
-      (\n -> foldl1 ((*>) . (*> ((char ',') *> ss))) (replicate n modifier) *> string "")
+  pgInterval :: Parser Text
+  pgInterval = liftA2 (*<>) (asciiCI "interval" <* ss) (
+        asciiCI "year to month"
+    <|> asciiCI "day to hour"
+    <|> asciiCI "day to minute"
+    <|> asciiCI "day to second"
+    <|> asciiCI "hour to minute"
+    <|> asciiCI "hour to second"
+    <|> asciiCI "minute to second"
+    <|> asciiCI "year"
+    <|> asciiCI "month"
+    <|> asciiCI "day"
+    <|> asciiCI "hour"
+    <|> asciiCI "minute"
+    <|> asciiCI "second"
+    <|> asciiCI "")
 
-    less = ($ limit) $ maybe
-      (string "")
-      (\n -> case n of
-          1 -> (string "")
-          _ -> (modifiers $ Just (n - 1)))
+  pgTime :: Parser (Text, Maybe Text)
+  pgTime = do
+    (base, modifier, zone) <- (,,)
+      <$> (asciiCI "timestamptz"
+       <|> asciiCI "timestamp"
+       <|> asciiCI "timetz"
+       <|> asciiCI "time")
+      <*> (ss *> pgTypeModifier)
+      <*> (ss *> (asciiCI "with time zone" <|> asciiCI "without time zone" <|> string ""))
+    return (base *<> zone, modifier)
 
-  modifier = (decimal :: Parser Int) *> ss
+  (*<>) l r = if T.null r then l else l <> T.singleton ' ' <> r
 
 
 -- | TODO
 pgColumn :: Parser PGColumn
 pgColumn = do
   pgcName <- fmap T.unpack $ ss *> pgIdentifier
-  pgcType <- fmap T.unpack $ ss *> pgType <* ss
+  pgcType <- fmap (T.unpack . fst) $ ss *> pgType <* ss
   return PGColumn {..}
 
--- | Parser for argument mode.
+-- | Parser for an argument mode.
 pgArgumentMode :: Parser PGArgumentMode
 pgArgumentMode =
       (asciiCI "inout"    *> space *> return InOut)
@@ -165,7 +159,7 @@ pgArgument = do
 
     pgArgumentName = fmap (Just . T.unpack) $ ss *> pgIdentifier
 
-    pgArgumentType = fmap T.unpack $ ss *> pgType
+    pgArgumentType = fmap (T.unpack . fst) $ ss *> pgType
 
     pgOptional = ss *> (
           ((asciiCI "default" <|> string "=") *> ((not . T.null) <$> pgExpression))
@@ -175,8 +169,8 @@ pgArgument = do
 
 -- | Parser for 'pg_get_function_result' output.
 pgResult :: Parser PGResult
-pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> pgType) >>= \case
-  "setof" -> (PGSetOf . T.unpack) <$> (ss *> pgType)
+pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pgType)) >>= \case
+  "setof" -> (PGSetOf . T.unpack) <$> (ss *> (fst <$> pgType))
   "table" -> PGTable <$> (ss *> char '(' *> pgColumn `sepBy` (char ',') <* ss <* char ')')
   t       -> return $ PGSingle (T.unpack t)
 
