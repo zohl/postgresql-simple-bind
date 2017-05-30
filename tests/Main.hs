@@ -122,10 +122,16 @@ spec = do
       test "interval month"                 ("interval month"           , Nothing)
       test "interval minute to second (4)"  ("interval minute to second", Just "4")
 
+    it "works with arrays" $ do
+      test "varchar []"        ("varchar[]"  , Nothing)
+      test "varchar [10]"      ("varchar[]"  , Nothing)
+      test "varchar [4][4]"    ("varchar[][]", Nothing)
+      test "varchar array"     ("varchar[]"  , Nothing)
+      test "varchar array [2]" ("varchar[]"  , Nothing)
+
     it "works with user-defined types" $ do
       test "t_custom_type"           ("t_custom_type", Nothing)
       test "t_custom_type (1,2,3,4)" ("t_custom_type", Just "1,2,3,4")
-
 
   let test = \declaration result -> parsePGFunction declaration >>= shouldBe result
 
