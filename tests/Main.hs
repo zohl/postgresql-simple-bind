@@ -22,6 +22,28 @@ testParser p s r = either
 
 spec :: Spec
 spec = do
+  describe "pgString" $ do
+    let test s = testParser pgString s s
+    it "works with single-quoted strings" $ do
+      test "'foo bar baz'"
+      test "'foo ''bar'' baz'"
+      test "'foo ''''bar'''' baz'"
+
+    it "works with double-quoted strings" $ do
+      test "\"foo bar baz\""
+      test "\"foo \"\"bar\"\" baz\""
+      test "\"foo \"\"\"\"'bar'\"\"\"\" baz\""
+
+    it "works with dollar-quoted strings" $ do
+      test "$$foo bar baz$$"
+      test "$$foo $ bar baz$$"
+      test "$$foo $ bar $ baz$$"
+
+    it "works with tagged dollar-quoted strings" $ do
+      test "$qux$foo bar baz$qux$"
+      test "$qux$foo $$ bar baz$qux$"
+      test "$qux$foo bar $qux baz$qux$"
+      test "$qux$foo bar $qux2$ baz$qux$"
 
   describe "pgResult" $ do
     let test = testParser pgResult

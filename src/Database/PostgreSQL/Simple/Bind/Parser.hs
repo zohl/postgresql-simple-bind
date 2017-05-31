@@ -31,6 +31,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgIdentifier
   , pgType
   , pgResult
+  , pgString
   , pgColumn
   , pgArgument
   , pgArgumentMode
@@ -52,30 +53,58 @@ import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import qualified Data.Text as T
 import qualified Prelude as P
 
+
 ss :: Parser ()
 ss = skipSpace
 
+
+-- | Parser for a string surrounded by "'" or "\"".
+pgQuotedString :: Char -> Parser Text
+pgQuotedString q = do
+  (s, mq) <- (,)
+    <$> (liftA2 (<>)
+         (T.cons q <$> (takeWhile (/= q)))
+         (T.singleton <$> anyChar))
+    <*> peekChar
+  case mq of
+    Nothing -> return s
+    Just c  -> if c == q
+               then liftA2 (<>) (return s) (anyChar *> pgQuotedString q)
+               else return s
+
+-- | Parser for a dollar-quoted string.
+pgDollarQuotedString :: Text -> Parser Text
+pgDollarQuotedString q = do
+  (s, t) <- liftA2 (,)
+    (takeWhile (/= '$'))
+    (string q <|> (fmap T.singleton $ char '$'))
+  if t == q
+    then return (s <> t)
+    else fmap ((T.snoc s '$') <>) (pgDollarQuotedString q)
+
+
+-- | Parser for a tag of dollar-quoted string literal.
+pgTag :: Parser Text
+pgTag = pgNonEmptyTag <|> (pure "") where
+  pgNonEmptyTag :: Parser Text
+  pgNonEmptyTag = liftA2 T.cons (satisfy $ inClass "a-zA-Z_") (takeWhile $ inClass "a-zA-Z0-9_")
+
+-- | Parser for a string.
+pgString :: Parser Text
+pgString = anyChar >>= \case
+   '\'' -> pgQuotedString '\''
+   '"'  -> pgQuotedString '"'
+   '$'  -> liftA2 T.snoc (fmap (T.cons '$') $ pgTag) (char '$')
+           >>= \tag -> fmap (tag <>) (pgDollarQuotedString tag)
+   _    -> fail "TODO: quote not supported"
+
+
 -- | Parser for a generic identifier.
 pgIdentifier :: Parser Text
-pgIdentifier = pgQuotedIdentifier <|> pgNormalIdentifier where
+pgIdentifier = ((char '"') *> (pgQuotedString '"')) <|> pgNormalIdentifier where
   pgNormalIdentifier = T.toLower <$> liftA2 T.cons
     (satisfy $ inClass "a-zA-Z_")
     (takeWhile $ inClass "a-zA-Z0-9_$")
-
-  quote = '"'
-
-  pgQuotedIdentifier = do
-    (s, mc) <- (,)
-      <$> (liftA2 (<>) pgQuotedIdentifier' (T.singleton <$> anyChar))
-      <*> peekChar
-    case mc of
-      Nothing -> return s
-      Just c  -> if c == quote
-                 then liftA2 (<>) (return s) pgQuotedIdentifier
-                 else return s
-
-  pgQuotedIdentifier' = T.cons <$> (char '"') <*> (takeWhile (/= '"'))
-
 
 -- | Parser for a type.
 pgType :: Parser (Text, Maybe Text)
