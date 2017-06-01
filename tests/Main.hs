@@ -139,7 +139,7 @@ spec = do
       test "timestamp with time zone" ("timestamp with time zone", Nothing)
       test "timestamptz"              ("timestamptz"             , Nothing)
 
-    it "works for intervals" $ do
+    it "works with intervals" $ do
       test "interval"                       ("interval"                 , Nothing)
       test "interval month"                 ("interval month"           , Nothing)
       test "interval minute to second (4)"  ("interval minute to second", Just "4")
@@ -150,6 +150,12 @@ spec = do
       test "varchar [4][4]"    ("varchar[][]", Nothing)
       test "varchar array"     ("varchar[]"  , Nothing)
       test "varchar array [2]" ("varchar[]"  , Nothing)
+      test "varchar(16)[2]"    ("varchar[]"  , Just "16")
+
+    it "works with quoted type names" $ do
+      test "\"varchar\""        ("\"varchar\""  , Nothing)
+      test "\"varchar\"(16)"    ("\"varchar\""  , Just "16")
+      test "\"varchar\"(16)[2]" ("\"varchar\"[]", Just "16")
 
     it "works with user-defined types" $ do
       test "t_custom_type"           ("t_custom_type", Nothing)
