@@ -157,6 +157,10 @@ spec = do
       test "\"varchar\"(16)"    ("\"varchar\""  , Just "16")
       test "\"varchar\"(16)[2]" ("\"varchar\"[]", Just "16")
 
+    it "works with column-type expressions" $ do
+      test "country.code%type"          ("country.code%type"        , Nothing)
+      test "\"country\".\"code\"%type"  ("\"country\".\"code\"%type", Nothing)
+
     it "works with user-defined types" $ do
       test "t_custom_type"           ("t_custom_type", Nothing)
       test "t_custom_type (1,2,3,4)" ("t_custom_type", Just "1,2,3,4")

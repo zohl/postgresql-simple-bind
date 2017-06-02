@@ -108,62 +108,72 @@ pgIdentifier = ((char '"') *> (pgQuotedString '"')) <|> pgNormalIdentifier where
 
 -- | Parser for a type.
 pgType :: Parser (Text, Maybe Text)
-pgType = do
-  (typeName, typeModifiers) <- (pgTime <|> (liftA2 (,) pgTypeName (ss *> pgTypeModifier)))
-  dimensions <- pgDimensions
-  return (typeName <> dimensions, typeModifiers) where
+pgType = pgColumnType <|> pgExactType where
 
-    pgTypeName :: Parser Text
-    pgTypeName = pgInterval
-             <|> asciiCI "double precision"
-             <|> asciiCI "bit varying"
-             <|> asciiCI "character varying"
-             <|> pgIdentifier
+  pgColumnType :: Parser (Text, Maybe Text)
+  pgColumnType = fmap ((,Nothing) . mconcat) . sequence $ [
+      pgIdentifier
+    , T.singleton <$> char '.'
+    , pgIdentifier
+    , (asciiCI "%type")]
 
-    pgTypeModifier :: Parser (Maybe Text)
-    pgTypeModifier = ((char '(') *> (Just <$> pgTypeModifier') <* (char ')'))
-                 <|> pure Nothing where
-      pgTypeModifier' = takeWhile1 (/= ')')  -- TODO: can be arbitrary string or identifier
+  pgExactType :: Parser (Text, Maybe Text)
+  pgExactType = do
+    (typeName, typeModifiers) <-pgTime <|> (liftA2 (,) pgTypeName (ss *> pgTypeModifier))
+    dimensions <- pgDimensions
+    return (typeName <> dimensions, typeModifiers)
+
+  pgTypeName :: Parser Text
+  pgTypeName = pgInterval
+           <|> asciiCI "double precision"
+           <|> asciiCI "bit varying"
+           <|> asciiCI "character varying"
+           <|> pgIdentifier
+
+  pgTypeModifier :: Parser (Maybe Text)
+  pgTypeModifier = ((char '(') *> (Just <$> pgTypeModifier') <* (char ')'))
+               <|> pure Nothing where
+    pgTypeModifier' = takeWhile1 (/= ')')  -- TODO: can be arbitrary string or identifier
 
 
-    pgInterval :: Parser Text
-    pgInterval = liftA2 (*<>) (asciiCI "interval" <* ss) (
-          asciiCI "year to month"
-      <|> asciiCI "day to hour"
-      <|> asciiCI "day to minute"
-      <|> asciiCI "day to second"
-      <|> asciiCI "hour to minute"
-      <|> asciiCI "hour to second"
-      <|> asciiCI "minute to second"
-      <|> asciiCI "year"
-      <|> asciiCI "month"
-      <|> asciiCI "day"
-      <|> asciiCI "hour"
-      <|> asciiCI "minute"
-      <|> asciiCI "second"
-      <|> asciiCI "")
+  pgInterval :: Parser Text
+  pgInterval = liftA2 (*<>) (asciiCI "interval" <* ss) (
+        asciiCI "year to month"
+    <|> asciiCI "day to hour"
+    <|> asciiCI "day to minute"
+    <|> asciiCI "day to second"
+    <|> asciiCI "hour to minute"
+    <|> asciiCI "hour to second"
+    <|> asciiCI "minute to second"
+    <|> asciiCI "year"
+    <|> asciiCI "month"
+    <|> asciiCI "day"
+    <|> asciiCI "hour"
+    <|> asciiCI "minute"
+    <|> asciiCI "second"
+    <|> asciiCI "")
 
-    pgTime :: Parser (Text, Maybe Text)
-    pgTime = do
-      (base, modifier, zone) <- (,,)
-        <$> (asciiCI "timestamptz"
-         <|> asciiCI "timestamp"
-         <|> asciiCI "timetz"
-         <|> asciiCI "time")
-        <*> (ss *> pgTypeModifier)
-        <*> (ss *> (asciiCI "with time zone" <|> asciiCI "without time zone" <|> string ""))
-      pure (base *<> zone, modifier)
+  pgTime :: Parser (Text, Maybe Text)
+  pgTime = do
+    (base, modifier, zone) <- (,,)
+      <$> (asciiCI "timestamptz"
+       <|> asciiCI "timestamp"
+       <|> asciiCI "timetz"
+       <|> asciiCI "time")
+      <*> (ss *> pgTypeModifier)
+      <*> (ss *> (asciiCI "with time zone" <|> asciiCI "without time zone" <|> string ""))
+    pure (base *<> zone, modifier)
 
-    (*<>) l r = if T.null r then l else l <> T.singleton ' ' <> r
+  (*<>) l r = if T.null r then l else l <> T.singleton ' ' <> r
 
-    pgDimensions :: Parser Text
-    pgDimensions = fmap ((flip T.replicate) "[]") $
-          (asciiCI "array" *> ss *> (dimension *> (pure 1) <|> (pure 1)))
-      <|> (fmap P.length $ many (ss *> dimension))
-      <|> (pure 0)
-      where
-        dimension :: Parser (Maybe Int)
-        dimension = (char '[') *> ((Just <$> decimal) <|> pure Nothing) <* (char ']')
+  pgDimensions :: Parser Text
+  pgDimensions = fmap ((flip T.replicate) "[]") $
+        (asciiCI "array" *> ss *> (dimension *> (pure 1) <|> (pure 1)))
+    <|> (fmap P.length $ many (ss *> dimension))
+    <|> (pure 0)
+    where
+      dimension :: Parser (Maybe Int)
+      dimension = (char '[') *> ((Just <$> decimal) <|> pure Nothing) <* (char ']')
 
 -- | TODO
 pgColumn :: Parser PGColumn
