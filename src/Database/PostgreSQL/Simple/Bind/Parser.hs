@@ -133,7 +133,7 @@ pgType = pgColumnType <|> pgExactType where
   pgTypeModifier :: Parser (Maybe Text)
   pgTypeModifier = ((char '(') *> (Just <$> pgTypeModifier') <* (char ')'))
                <|> pure Nothing where
-    pgTypeModifier' = takeWhile1 (/= ')')  -- TODO: can be arbitrary string or identifier
+    pgTypeModifier' = pgString <|> takeWhile1 (/= ')')
 
 
   pgInterval :: Parser Text

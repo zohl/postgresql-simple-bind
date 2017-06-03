@@ -125,10 +125,14 @@ spec = do
       test "timestamp with time zone" ("timestamp with time zone", Nothing)
 
     it "works with types with modifiers" $ do
-      test "varchar(256)"            ("varchar"          , Just "256")
-      test "numeric(10)"             ("numeric"          , Just "10")
-      test "numeric(10,3)"           ("numeric"          , Just "10,3")
-      test "character varying(1024)" ("character varying", Just "1024")
+      test "varchar(256)"               ("varchar"          , Just "256")
+      test "numeric(10)"                ("numeric"          , Just "10")
+      test "numeric(10,3)"              ("numeric"          , Just "10,3")
+      test "character varying(1024)"    ("character varying", Just "1024")
+      test "t_type('foo)(bar')"         ("t_type"           , Just "'foo)(bar'")
+      test "t_type(\"foo)(bar\")"       ("t_type"           , Just "\"foo)(bar\"")
+      test "t_type($$foo)(bar$$)"       ("t_type"           , Just "$$foo)(bar$$")
+      test "t_type($baz$foo)(bar$baz$)" ("t_type"           , Just "$baz$foo)(bar$baz$")
 
     it "works with time types" $ do
       test "time"                     ("time"                    , Nothing)
