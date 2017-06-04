@@ -45,6 +45,15 @@ spec = do
       test "$qux$foo bar $qux baz$qux$"
       test "$qux$foo bar $qux2$ baz$qux$"
 
+
+  describe "pgColumn" $ do
+    let test = testParser pgColumn
+    it "just works" $ do
+      test "foo varchar"       PGColumn {pgcName = "foo", pgcType = "varchar"}
+      test "foo varchar(16)"   PGColumn {pgcName = "foo", pgcType = "varchar"}
+      test "foo varchar(16)[]" PGColumn {pgcName = "foo", pgcType = "varchar[]"}
+
+
   describe "pgResult" $ do
     let test = testParser pgResult
 

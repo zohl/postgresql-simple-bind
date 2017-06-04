@@ -175,12 +175,11 @@ pgType = pgColumnType <|> pgExactType where
       dimension :: Parser (Maybe Int)
       dimension = (char '[') *> ((Just <$> decimal) <|> pure Nothing) <* (char ']')
 
--- | TODO
+-- | Parser for column definition in RETURNS TABLE clause.
 pgColumn :: Parser PGColumn
-pgColumn = do
-  pgcName <- fmap T.unpack $ ss *> pgIdentifier
-  pgcType <- fmap (T.unpack . fst) $ ss *> pgType <* ss
-  return PGColumn {..}
+pgColumn = liftA2 PGColumn
+  (T.unpack <$> pgIdentifier)
+  ((T.unpack . fst) <$> (ss *> pgType))
 
 -- | Parser for an argument mode.
 pgArgumentMode :: Parser PGArgumentMode
@@ -222,7 +221,7 @@ pgArgument = do
 pgResult :: Parser PGResult
 pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pgType)) >>= \case
   "setof" -> (PGSetOf . T.unpack) <$> (ss *> (fst <$> pgType))
-  "table" -> PGTable <$> (ss *> char '(' *> pgColumn `sepBy` (char ',') <* ss <* char ')')
+  "table" -> PGTable <$> (ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')')
   t       -> return $ PGSingle (T.unpack t)
 
 -- | TODO
