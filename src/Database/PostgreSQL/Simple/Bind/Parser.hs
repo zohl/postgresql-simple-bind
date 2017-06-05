@@ -224,15 +224,15 @@ pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pg
   "table" -> PGTable <$> (ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')')
   t       -> return $ PGSingle (T.unpack t)
 
--- | TODO
+-- | Parser for a function.
 pgFunction :: Parser PGFunction
 pgFunction = do
-  _            <- asciiCI "function"
-  pgfSchema    <- fmap T.unpack $ ss *> ((pgIdentifier <* (char '.')) <|> (string ""))
-  pgfName      <- fmap T.unpack $ ss *> pgIdentifier
-  pgfArguments <- ss *> char '(' *> (pgArgument `sepBy` (char ','))
-  pgfResult    <- ss *> char ')' *> ss *> asciiCI "returns" *> ss *> pgResult
-  _            <- ss
+  _            <- asciiCI "create" *> ss *> asciiCI "function"
+  pgfName      <- ss *> (T.unpack <$> pgIdentifier)
+  pgfArguments <- ss *> char '(' *> ((ss *> pgArgument <* ss) `sepBy` (char ',')) <* char ')'
+  pgfResult    <- ss *> asciiCI "returns" *> ss *> pgResult
+  _            <- ss *> "as" *> ss *> pgString
+  let pgfSchema = "" -- TODO
   return PGFunction {..}
 
 

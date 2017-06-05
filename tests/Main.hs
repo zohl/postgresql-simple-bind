@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 import Control.Monad.Catch (throwM)
 import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
@@ -7,6 +8,7 @@ import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..))
+import Text.Heredoc (str)
 import Test.Hspec
 import qualified Data.Text as T
 
@@ -178,70 +180,44 @@ spec = do
       test "t_custom_type"           ("t_custom_type", Nothing)
       test "t_custom_type (1,2,3,4)" ("t_custom_type", Just "1,2,3,4")
 
-  let test = \declaration result -> parsePGFunction declaration >>= shouldBe result
+  describe "pgFunction" $ do
+    let test = testParser pgFunction
 
-  describe "parsePGFunction" $ do
-    it "works with simple signatures" $ do
-      let r = PGFunction {
-          pgfSchema    = ""
-        , pgfName      = ""
-        , pgfArguments = []
-        , pgfResult    = PGSingle ""
-        }
+    it "works with simple declarations" $ do
+      test
+        [str|create function foo()
+            |returns bigint as
+            |'select 42::bigint'|]
+        PGFunction {
+            pgfSchema = ""
+          , pgfName   = "foo"
+          , pgfArguments = []
+          , pgfResult = PGSingle "bigint"
+          }
 
-      test "function f(x bigint) returns bigint" r {
-          pgfName = "f"
-        , pgfResult = PGSingle "bigint"
-        , pgfArguments = [
-              PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint", pgaOptional = False }
-            ]
-        }
+      test
+        [str|create function foo(p_bar varchar)
+            |returns bigint as
+            |$$ select 42::bigint $$|]
+        PGFunction {
+            pgfSchema = ""
+          , pgfName   = "foo"
+          , pgfArguments = [
+                PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}]
+          , pgfResult = PGSingle "bigint"
+          }
 
-      test "function h() returns varchar" r {
-          pgfName = "h"
-        , pgfArguments = []
-        , pgfResult = PGSingle "varchar"
-        }
-
-
-
-    it "works with default values" $ do
-      let r = PGFunction {
-          pgfSchema    = ""
-        , pgfName      = "f"
-        , pgfArguments = []
-        , pgfResult    = PGSingle "void"
-        }
-
-      test "function f(x bigint default 0::bigint) returns void" r {
-          pgfArguments = [
-              PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint", pgaOptional = True }
-            ]
-        }
-
-      test "function f(x bigint, y bigint default 0::bigint) returns void" r {
-          pgfArguments = [
-              PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint", pgaOptional = False }
-            , PGArgument { pgaMode = def, pgaName = Just "y", pgaType = "bigint", pgaOptional = True }
-            ]
-        }
-
-      test "function f(x bigint, y bigint = 0::bigint, z bigint = 0::bigint) returns void" r {
-          pgfArguments = [
-              PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint", pgaOptional = False }
-            , PGArgument { pgaMode = def, pgaName = Just "y", pgaType = "bigint", pgaOptional = True }
-            , PGArgument { pgaMode = def, pgaName = Just "z", pgaType = "bigint", pgaOptional = True }
-            ]
-        }
-
-    it "works with schema names" $ do
-      let r = PGFunction {
-          pgfSchema = ""
-        , pgfName = "f"
-        , pgfArguments = []
-        , pgfResult = PGSingle "bigint"
-        }
-
-      test "function public.f() returns bigint" r { pgfSchema = "public" }
-
-      test "function Test.f() returns bigint" r { pgfSchema = "test" }
+      test
+        [str|create function foo(p_bar varchar, p_baz varchar)
+            |returns bigint as
+            |$body$
+            |  select 42::bigint'
+            |$body$|]
+        PGFunction {
+            pgfSchema = ""
+          , pgfName   = "foo"
+          , pgfArguments = [
+                PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}
+              , PGArgument {pgaMode = def, pgaName = Just "p_baz", pgaType = "varchar", pgaOptional = False}]
+          , pgfResult = PGSingle "bigint"
+          }
