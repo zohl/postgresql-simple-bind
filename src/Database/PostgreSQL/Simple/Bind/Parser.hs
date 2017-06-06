@@ -57,6 +57,10 @@ import qualified Prelude as P
 ss :: Parser ()
 ss = skipSpace
 
+asciiCIs :: [Text] -> Parser ()
+asciiCIs []     = return ()
+asciiCIs (w:ws) = asciiCI w *> ss *> asciiCIs ws
+
 
 -- | Parser for a string surrounded by "'" or "\"".
 pgQuotedString :: Char -> Parser Text
@@ -227,7 +231,7 @@ pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pg
 -- | Parser for a function.
 pgFunction :: Parser PGFunction
 pgFunction = do
-  _            <- asciiCI "create" *> ss *> asciiCI "function"
+  _            <- asciiCIs ["create", "function"] <|> asciiCIs ["create", "or", "replace", "function"] 
   pgfName      <- ss *> (T.unpack <$> pgIdentifier)
   pgfArguments <- ss *> char '(' *> ((ss *> pgArgument <* ss) `sepBy` (char ',')) <* char ')'
   pgfResult    <- ss *> asciiCI "returns" *> ss *> pgResult

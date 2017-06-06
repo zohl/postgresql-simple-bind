@@ -196,6 +196,17 @@ spec = do
           }
 
       test
+        [str|create or replace function foo()
+            |returns bigint as
+            |'select 42::bigint'|]
+        PGFunction {
+            pgfSchema = ""
+          , pgfName   = "foo"
+          , pgfArguments = []
+          , pgfResult = PGSingle "bigint"
+          }
+
+      test
         [str|create function foo(p_bar varchar)
             |returns bigint as
             |$$ select 42::bigint $$|]
