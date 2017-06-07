@@ -231,12 +231,14 @@ pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pg
 -- | Parser for a function.
 pgFunction :: Parser PGFunction
 pgFunction = do
-  _            <- asciiCIs ["create", "function"] <|> asciiCIs ["create", "or", "replace", "function"] 
-  pgfName      <- ss *> (T.unpack <$> pgIdentifier)
+  _            <- asciiCIs ["create", "function"] <|> asciiCIs ["create", "or", "replace", "function"]
+  (pgfSchema, pgfName) <- ss *> (
+        ((,) <$> (fmap (Just . T.unpack) $ pgIdentifier) <*> (char '.' *> (T.unpack <$> pgIdentifier)))
+    <|> ((Nothing,) . T.unpack <$> pgIdentifier))
+
   pgfArguments <- ss *> char '(' *> ((ss *> pgArgument <* ss) `sepBy` (char ',')) <* char ')'
   pgfResult    <- ss *> asciiCI "returns" *> ss *> pgResult
   _            <- ss *> "as" *> ss *> pgString
-  let pgfSchema = "" -- TODO
   return PGFunction {..}
 
 

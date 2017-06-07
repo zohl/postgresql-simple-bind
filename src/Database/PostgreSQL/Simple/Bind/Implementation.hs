@@ -309,10 +309,10 @@ queryPrefix PostgresBindOptions {..} PGFunction {..} = select ++ " " ++ function
   mkSelect AsRow   = "select * from"
   mkSelect AsField = "select"
 
-  function = case pgfSchema of
-    "" -> pgfName
-    _  -> pgfSchema ++ "." ++ pgfName
-
+  function = maybe
+    pgfName
+    (++ ("." ++ pgfName))
+    pgfSchema
 
 -- TODO:
 -- - type casting

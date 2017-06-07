@@ -41,7 +41,7 @@ data PGArgument = PGArgument {
 
 -- | Representation of a PostrgeSQL function signature (schema, name, arguments, result).
 data PGFunction = PGFunction {
-    pgfSchema    :: String
+    pgfSchema    :: Maybe String
   , pgfName      :: String
   , pgfArguments :: [PGArgument]
   , pgfResult    :: PGResult
