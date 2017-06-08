@@ -40,8 +40,10 @@ module Database.PostgreSQL.Simple.Bind.Parser (
 
 
 import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
+import Control.Arrow ((&&&), second)
 import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow(..), throwM)
+import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
@@ -221,12 +223,34 @@ pgArgument = do
               when (maybe False (not . inClass ",)") mc) $ fail "TODO"
               return False))
 
+
 -- | Parser for 'pg_get_function_result' output.
 pgResult :: Parser PGResult
 pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pgType)) >>= \case
   "setof" -> (PGSetOf . T.unpack) <$> (ss *> (fst <$> pgType))
   "table" -> PGTable <$> (ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')')
   t       -> return $ PGSingle (T.unpack t)
+
+-- | Move 'Out' arguments to PGResult record.
+normalizeFunction :: [PGArgument] -> Maybe PGResult -> ([PGArgument], PGResult)
+normalizeFunction args mres = (iArgs, res) where
+
+  splitArgs :: [PGArgument] -> ([PGArgument], [PGArgument])
+  splitArgs = (filter ((/= Out) . pgaMode)) &&& (filter ((flip elem [Out, InOut]) . pgaMode))
+
+  mkResult :: [PGArgument] -> Maybe PGResult
+  mkResult = \case
+    []  -> Nothing
+    [a] -> Just . PGSingle . pgaType $ a
+    _   -> error "TODO" -- TODO: Support for multiple out-variables.
+
+  (iArgs, mres') = second mkResult $ splitArgs args
+
+  res = fromMaybe (error "TODO: No information of return type") $
+    case (liftA2 (==) mres mres') of
+      Nothing    -> mres <|> mres'
+      Just False -> error "TODO: Incoherent declaration"
+      _          -> mres
 
 -- | Parser for a function.
 pgFunction :: Parser PGFunction
@@ -236,9 +260,12 @@ pgFunction = do
         ((,) <$> (fmap (Just . T.unpack) $ pgIdentifier) <*> (char '.' *> (T.unpack <$> pgIdentifier)))
     <|> ((Nothing,) . T.unpack <$> pgIdentifier))
 
-  pgfArguments <- ss *> char '(' *> ((ss *> pgArgument <* ss) `sepBy` (char ',')) <* char ')'
-  pgfResult    <- ss *> asciiCI "returns" *> ss *> pgResult
-  _            <- ss *> "as" *> ss *> pgString
+  pgfArguments' <- ss *> char '(' *> ((ss *> pgArgument <* ss) `sepBy` (char ',')) <* char ')'
+  pgfResult'    <- ss *> (asciiCI "returns" *> ss *> (Just <$> pgResult)) <|> (return Nothing)
+  _             <- ss *> "as" *> ss *> pgString
+
+  let (pgfArguments, pgfResult) = normalizeFunction pgfArguments' pgfResult'
+
   return PGFunction {..}
 
 

@@ -232,3 +232,25 @@ spec = do
               , PGArgument {pgaMode = def, pgaName = Just "p_baz", pgaType = "varchar", pgaOptional = False}]
           , pgfResult = PGSingle "bigint"
           }
+
+    it "works with single OUT parameter" $ do
+      test
+        [str|create function foo(out p_result bigint) as
+            |'select 42::bigint'|]
+        PGFunction {
+            pgfSchema    = Nothing
+          , pgfName      = "foo"
+          , pgfArguments = []
+          , pgfResult    = PGSingle "bigint"
+          }
+
+      test
+        [str|create function foo(out p_result bigint)
+            |returns bigint as
+            |'select 42::bigint'|]
+        PGFunction {
+            pgfSchema    = Nothing
+          , pgfName      = "foo"
+          , pgfArguments = []
+          , pgfResult    = PGSingle "bigint"
+          }
