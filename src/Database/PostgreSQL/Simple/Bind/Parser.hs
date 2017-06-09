@@ -43,14 +43,14 @@ import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
 import Control.Arrow ((&&&), second)
 import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow(..), throwM)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, fromJust)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), isPGTuple)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import qualified Data.Text as T
 import qualified Prelude as P
@@ -242,14 +242,16 @@ normalizeFunction args mres = (iArgs, res) where
   mkResult = \case
     []  -> Nothing
     [a] -> Just . PGSingle . pgaType $ a
-    _   -> error "TODO" -- TODO: Support for multiple out-variables.
+    as  -> Just . PGTuple . map (pgaType) $ as
 
   (iArgs, mres') = second mkResult $ splitArgs args
 
   res = fromMaybe (error "TODO: No information of return type") $
     case (liftA2 (==) mres mres') of
       Nothing    -> mres <|> mres'
-      Just False -> error "TODO: Incoherent declaration"
+      Just False -> if (fromJust mres == (PGSingle "record") && isPGTuple (fromJust mres'))
+                    then mres'
+                    else (error "TODO: Incoherent declaration")
       _          -> mres
 
 -- | Parser for a function.

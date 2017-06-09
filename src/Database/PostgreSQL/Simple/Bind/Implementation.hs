@@ -163,6 +163,9 @@ mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
 
   return (names, context, clause)
 
+mkResultT opt fname (PGTuple ts) = fmap
+  ((\(ns, cs, es) -> (concat ns, concat cs, foldl AppT (TupleT (length es)) es)) . unzip3)
+  $ mapM (mkResultT opt fname . PGSingle) ts
 
 -- | Example: [
 --     PGArgument { pgaName = "x", pgaType = "varchar", pgaOptional = True }
@@ -226,6 +229,7 @@ unwrapE :: PostgresBindOptions -> PGResult -> Exp -> Exp
 unwrapE _   (PGSingle _)    q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
 unwrapE opt (PGSetOf tname) q = unwrapE' (pboSetOfReturnType opt tname) q
 unwrapE _   (PGTable _)     q = unwrapE' AsRow q
+unwrapE _   (PGTuple _)     q = unwrapE' AsRow q
 
 
 wrapArg :: PostgresBindOptions -> PGArgument -> Name -> Exp

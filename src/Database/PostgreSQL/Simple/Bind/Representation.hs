@@ -18,6 +18,7 @@ module Database.PostgreSQL.Simple.Bind.Representation (
   , PGArgumentMode(..)
   , PGColumn(..)
   , PGResult(..)
+  , isPGTuple
   ) where
 
 
@@ -58,4 +59,10 @@ data PGResult
   = PGSingle String
   | PGSetOf  String
   | PGTable  [PGColumn]
+  | PGTuple  [String]
     deriving (Show, Eq)
+
+-- | PGTuple indicator.
+isPGTuple :: PGResult -> Bool
+isPGTuple (PGTuple _) = True
+isPGTuple _           = False
