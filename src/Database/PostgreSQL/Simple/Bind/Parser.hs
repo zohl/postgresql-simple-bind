@@ -43,7 +43,7 @@ import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
 import Control.Arrow ((&&&), second)
 import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow(..), throwM)
-import Data.Maybe (fromMaybe, fromJust)
+import Control.Monad.Trans.Maybe (MaybeT(..))
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
@@ -54,6 +54,18 @@ import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumen
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import qualified Data.Text as T
 import qualified Prelude as P
+
+
+data ParserException
+  = NoReturnTypeInfo
+    -- ^ Thrown when function has no 'RETURNS' clause and no 'OUT'
+    -- arguments.
+  | IncoherentReturnTypes PGResult PGResult
+    -- ^ Thrown when function has incoherent 'RETURNS' clause and 'OUT'
+    -- arguments.
+  | QuoteNotSupported Char
+    -- ^ Thrown when string literal starts with non-supported symbol.
+  deriving (Show)
 
 
 ss :: Parser ()
@@ -102,7 +114,7 @@ pgString = anyChar >>= \case
    '"'  -> pgQuotedString '"'
    '$'  -> liftA2 T.snoc (fmap (T.cons '$') $ pgTag) (char '$')
            >>= \tag -> fmap (tag <>) (pgDollarQuotedString tag)
-   _    -> fail "TODO: quote not supported"
+   c    -> fail . show $ QuoteNotSupported c
 
 
 -- | Parser for a generic identifier.
@@ -232,27 +244,31 @@ pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pg
   t       -> return $ PGSingle (T.unpack t)
 
 -- | Move 'Out' arguments to PGResult record.
-normalizeFunction :: [PGArgument] -> Maybe PGResult -> ([PGArgument], PGResult)
-normalizeFunction args mres = (iArgs, res) where
+normalizeFunction :: [PGArgument] -> Maybe PGResult -> Parser ([PGArgument], PGResult)
+normalizeFunction args mr = do
+  let (iArgs, mres') = second mkResult $ splitArgs args
+  r <- mergeResults mr mres' >>= maybe (fail . show $ NoReturnTypeInfo) return
+  return (iArgs, r) where
 
-  splitArgs :: [PGArgument] -> ([PGArgument], [PGArgument])
-  splitArgs = (filter ((/= Out) . pgaMode)) &&& (filter ((flip elem [Out, InOut]) . pgaMode))
+    splitArgs :: [PGArgument] -> ([PGArgument], [PGArgument])
+    splitArgs = (filter ((/= Out) . pgaMode)) &&& (filter ((flip elem [Out, InOut]) . pgaMode))
 
-  mkResult :: [PGArgument] -> Maybe PGResult
-  mkResult = \case
-    []  -> Nothing
-    [a] -> Just . PGSingle . pgaType $ a
-    as  -> Just . PGTuple . map (pgaType) $ as
+    mkResult :: [PGArgument] -> Maybe PGResult
+    mkResult = \case
+      []  -> Nothing
+      [a] -> Just . PGSingle . pgaType $ a
+      as  -> Just . PGTuple . map (pgaType) $ as
 
-  (iArgs, mres') = second mkResult $ splitArgs args
-
-  res = fromMaybe (error "TODO: No information of return type") $
-    case (liftA2 (==) mres mres') of
-      Nothing    -> mres <|> mres'
-      Just False -> if (fromJust mres == (PGSingle "record") && isPGTuple (fromJust mres'))
-                    then mres'
-                    else (error "TODO: Incoherent declaration")
-      _          -> mres
+    mergeResults :: Maybe PGResult -> Maybe PGResult -> Parser (Maybe PGResult)
+    mergeResults mres mres' = case (liftA2 (==) mres mres') of
+      Nothing    -> return (mres <|> mres')
+      Just False -> runMaybeT $ do
+        res  <- MaybeT . pure $ mres
+        res' <- MaybeT . pure $ mres'
+        if (res == (PGSingle "record") && isPGTuple res')
+          then return res'
+          else MaybeT (fail . show $ IncoherentReturnTypes res res')
+      _          -> return mres
 
 -- | Parser for a function.
 pgFunction :: Parser PGFunction
@@ -266,7 +282,7 @@ pgFunction = do
   pgfResult'    <- ss *> (asciiCI "returns" *> ss *> (Just <$> pgResult)) <|> (return Nothing)
   _             <- ss *> "as" *> ss *> pgString
 
-  let (pgfArguments, pgfResult) = normalizeFunction pgfArguments' pgfResult'
+  (pgfArguments, pgfResult) <- normalizeFunction pgfArguments' pgfResult'
 
   return PGFunction {..}
 
