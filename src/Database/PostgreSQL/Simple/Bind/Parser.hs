@@ -36,6 +36,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgArgument
   , pgArgumentMode
   , pgFunction
+  , ParserException(..)
   ) where
 
 
@@ -56,6 +57,7 @@ import qualified Data.Text as T
 import qualified Prelude as P
 
 
+-- | Exceptions thrown by parsers.
 data ParserException
   = NoReturnTypeInfo
     -- ^ Thrown when function has no 'RETURNS' clause and no 'OUT'

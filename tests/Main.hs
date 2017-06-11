@@ -1,31 +1,30 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 
-import Control.Monad.Catch (throwM)
 import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
+import Data.Bifunctor (first)
 import Data.Default (def)
 import Data.Text (Text)
-import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..))
 import Text.Heredoc (str)
 import Test.Hspec
-import qualified Data.Text as T
 
 
 main :: IO ()
 main = hspec spec
 
-testParser :: (Show a, Eq a) => Parser a -> Text -> a -> IO ()
-testParser p s r = either
-  (\err -> throwM . ParserFailed . concat $ ["In declaration `", T.unpack s, "`: ", err])
-  (flip shouldBe r)
-  (parseOnly (p <* endOfInput) s) where
+testParser :: (Show a, Eq a) => Parser a -> Text -> Either ParserException a -> IO ()
+testParser parser text result =
+  (parseOnly (parser <* endOfInput) text)
+  `shouldBe`
+  (first ((prefix ++) . show) result) where
+    prefix = either id (const "") $ parseOnly (fail "") ""
 
 spec :: Spec
 spec = do
   describe "pgString" $ do
-    let test s = testParser pgString s s
+    let test t = testParser pgString t (Right t)
     it "works with single-quoted strings" $ do
       test "'foo bar baz'"
       test "'foo ''bar'' baz'"
@@ -49,7 +48,7 @@ spec = do
 
 
   describe "pgColumn" $ do
-    let test = testParser pgColumn
+    let test t = testParser pgColumn t . Right
     it "just works" $ do
       test "foo varchar"       PGColumn {pgcName = "foo", pgcType = "varchar"}
       test "foo varchar(16)"   PGColumn {pgcName = "foo", pgcType = "varchar"}
@@ -57,7 +56,7 @@ spec = do
 
 
   describe "pgResult" $ do
-    let test = testParser pgResult
+    let test t = testParser pgResult t . Right
 
     it "works with simple types" $ do
       test "bigint" $ PGSingle "bigint"
@@ -74,7 +73,7 @@ spec = do
 
 
   describe "pgArgument" $ do
-    let test = testParser pgArgument
+    let test t = testParser pgArgument t . Right
     it "works with simple arguments" $ do
       test "x bigint"  $ PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint",  pgaOptional = False }
       test "y varchar" $ PGArgument { pgaMode = def, pgaName = Just "y", pgaType = "varchar", pgaOptional = False }
@@ -106,7 +105,7 @@ spec = do
 
 
   describe "pgIdentifier" $ do
-    let test = testParser pgIdentifier
+    let test t = testParser pgIdentifier t . Right
     it "works with simple identifiers" $ do
       test "foo"     $ "foo"
       test "_bar123" $ "_bar123"
@@ -123,7 +122,7 @@ spec = do
 
 
   describe "pgType" $ do
-    let test = testParser pgType
+    let test t = testParser pgType t . Right
 
     it "works with simple type names" $ do
       test "varchar"   ("varchar"  , Nothing)
@@ -181,7 +180,8 @@ spec = do
       test "t_custom_type (1,2,3,4)" ("t_custom_type", Just "1,2,3,4")
 
   describe "pgFunction" $ do
-    let test = testParser pgFunction
+    let test t = testParser pgFunction t . Right
+    let catch t = testParser pgFunction t . Left
 
     it "works with simple declarations" $ do
       test
@@ -254,3 +254,16 @@ spec = do
           , pgfArguments = []
           , pgfResult    = PGSingle "bigint"
           }
+
+    it "rejects incorrect declarations" $ do
+      catch
+        "create function foo() as 'select 42::bigint'"
+        NoReturnTypeInfo
+
+      catch
+        [str|create function foo(out p1 bigint, out p2 varchar)
+            |returns timestamptz as
+            |$$ select 42::bigint, 'test'::varchar $$|]
+        (IncoherentReturnTypes
+          (PGSingle "timestamptz")
+          (PGTuple ["bigint", "varchar"]))
