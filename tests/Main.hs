@@ -189,7 +189,7 @@ spec = do
             |returns bigint as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema = ""
+            pgfSchema = Nothing
           , pgfName   = "foo"
           , pgfArguments = []
           , pgfResult = PGSingle "bigint"
@@ -200,7 +200,7 @@ spec = do
             |returns bigint as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema = ""
+            pgfSchema = Nothing
           , pgfName   = "foo"
           , pgfArguments = []
           , pgfResult = PGSingle "bigint"
@@ -211,7 +211,7 @@ spec = do
             |returns bigint as
             |$$ select 42::bigint $$|]
         PGFunction {
-            pgfSchema = ""
+            pgfSchema = Nothing
           , pgfName   = "foo"
           , pgfArguments = [
                 PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}]
@@ -225,11 +225,23 @@ spec = do
             |  select 42::bigint'
             |$body$|]
         PGFunction {
-            pgfSchema = ""
+            pgfSchema = Nothing
           , pgfName   = "foo"
           , pgfArguments = [
                 PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}
               , PGArgument {pgaMode = def, pgaName = Just "p_baz", pgaType = "varchar", pgaOptional = False}]
+          , pgfResult = PGSingle "bigint"
+          }
+
+    it "works with qualified function names" $ do
+      test
+        [str|create function test.foo()
+            |returns bigint as
+            |'select 42::bigint'|]
+        PGFunction {
+            pgfSchema = Just "test"
+          , pgfName   = "foo"
+          , pgfArguments = []
           , pgfResult = PGSingle "bigint"
           }
 
@@ -253,6 +265,29 @@ spec = do
           , pgfName      = "foo"
           , pgfArguments = []
           , pgfResult    = PGSingle "bigint"
+          }
+
+
+    it "works with multiple OUT parameters" $ do
+      test
+        [str|create function foo(out p1 bigint, out p2 varchar) as
+            |$$ select 42::bigint, 'test'::varchar $$|]
+        PGFunction {
+            pgfSchema    = Nothing
+          , pgfName      = "foo"
+          , pgfArguments = []
+          , pgfResult    = PGTuple ["bigint", "varchar"]
+          }
+
+      test
+        [str|create function foo(out p1 bigint, out p2 varchar)
+            |returns record as
+            |$$ select 42::bigint, 'test'::varchar $$|]
+        PGFunction {
+            pgfSchema    = Nothing
+          , pgfName      = "foo"
+          , pgfArguments = []
+          , pgfResult    = PGTuple ["bigint", "varchar"]
           }
 
     it "rejects incorrect declarations" $ do
