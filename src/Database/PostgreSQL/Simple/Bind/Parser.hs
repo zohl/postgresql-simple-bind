@@ -45,6 +45,7 @@ import Control.Arrow ((&&&), second)
 import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Control.Monad.Trans.Maybe (MaybeT(..))
+import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
@@ -53,6 +54,7 @@ import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), isPGTuple)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
+import Safe (tailSafe)
 import qualified Data.Text as T
 import qualified Prelude as P
 
@@ -67,6 +69,8 @@ data ParserException
     -- arguments.
   | QuoteNotSupported Char
     -- ^ Thrown when string literal starts with non-supported symbol.
+  | NonOutVariableAfterVariadic PGArgument
+    -- ^ Thrown when encountered a non-OUT argument after VARIADIC one.
   deriving (Show)
 
 
@@ -248,9 +252,17 @@ pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pg
 -- | Move 'Out' arguments to PGResult record.
 normalizeFunction :: [PGArgument] -> Maybe PGResult -> Parser ([PGArgument], PGResult)
 normalizeFunction args mr = do
+  checkVariadic
   let (iArgs, mres') = second mkResult $ splitArgs args
   r <- mergeResults mr mres' >>= maybe (fail . show $ NoReturnTypeInfo) return
   return (iArgs, r) where
+
+    checkVariadic :: Parser ()
+    checkVariadic = maybe
+     (return ())
+     (fail . show . NonOutVariableAfterVariadic)
+     . listToMaybe . filter ((/= Out) . pgaMode) . tailSafe . snd . break ((== Variadic) . pgaMode)
+     $ args
 
     splitArgs :: [PGArgument] -> ([PGArgument], [PGArgument])
     splitArgs = (filter ((/= Out) . pgaMode)) &&& (filter ((flip elem [Out, InOut]) . pgaMode))

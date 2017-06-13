@@ -181,7 +181,6 @@ spec = do
 
   describe "pgFunction" $ do
     let test t = testParser pgFunction t . Right
-    let catch t = testParser pgFunction t . Left
 
     it "works with simple declarations" $ do
       test
@@ -290,15 +289,26 @@ spec = do
           , pgfResult    = PGTuple ["bigint", "varchar"]
           }
 
-    it "rejects incorrect declarations" $ do
-      catch
+  describe "pgFunction (incorrect declarations)" $ do
+    let test t = testParser pgFunction t . Left
+
+    it "fails when cannot determine return type" $ do
+      test
         "create function foo() as 'select 42::bigint'"
         NoReturnTypeInfo
 
-      catch
+    it "fails when return types are incoherent" $ do
+      test
         [str|create function foo(out p1 bigint, out p2 varchar)
             |returns timestamptz as
             |$$ select 42::bigint, 'test'::varchar $$|]
         (IncoherentReturnTypes
           (PGSingle "timestamptz")
           (PGTuple ["bigint", "varchar"]))
+
+    it "fails when VARIADIC variable followed by non-OUT variable" $ do
+      test
+        [str|create function foo(variadic p1 bigint, out p2 varchar, in p3 varchar)
+            |returns varchar as ''|]
+        (NonOutVariableAfterVariadic
+          PGArgument { pgaMode = In, pgaName = Just "p3", pgaType = "varchar", pgaOptional = False })
