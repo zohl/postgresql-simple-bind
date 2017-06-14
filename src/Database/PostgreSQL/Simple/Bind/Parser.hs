@@ -44,7 +44,6 @@ import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
 import Control.Arrow ((&&&), second)
 import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow(..), throwM)
-import Control.Monad.Trans.Maybe (MaybeT(..))
 import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
@@ -52,7 +51,7 @@ import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, p
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), isPGTuple)
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), mergePGResults)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Safe (tailSafe)
 import qualified Data.Text as T
@@ -245,9 +244,9 @@ pgArgument = do
 -- | Parser for 'pg_get_function_result' output.
 pgResult :: Parser PGResult
 pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pgType)) >>= \case
-  "setof" -> (PGSetOf . T.unpack) <$> (ss *> (fst <$> pgType))
+  "setof" -> (PGSetOf . pure . T.unpack) <$> (ss *> (fst <$> pgType))
   "table" -> PGTable <$> (ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')')
-  t       -> return $ PGSingle (T.unpack t)
+  t       -> return . PGSingle . pure . T.unpack $ t
 
 -- | Move 'Out' arguments to PGResult record.
 normalizeFunction :: [PGArgument] -> Maybe PGResult -> Parser ([PGArgument], PGResult)
@@ -270,19 +269,16 @@ normalizeFunction args mr = do
     mkResult :: [PGArgument] -> Maybe PGResult
     mkResult = \case
       []  -> Nothing
-      [a] -> Just . PGSingle . pgaType $ a
-      as  -> Just . PGTuple . map (pgaType) $ as
+      as  -> Just . PGSingle . map (pgaType) $ as
 
     mergeResults :: Maybe PGResult -> Maybe PGResult -> Parser (Maybe PGResult)
-    mergeResults mres mres' = case (liftA2 (==) mres mres') of
-      Nothing    -> return (mres <|> mres')
-      Just False -> runMaybeT $ do
-        res  <- MaybeT . pure $ mres
-        res' <- MaybeT . pure $ mres'
-        if (res == (PGSingle "record") && isPGTuple res')
-          then return res'
-          else MaybeT (fail . show $ IncoherentReturnTypes res res')
-      _          -> return mres
+    mergeResults mres mres' = maybe
+     (return $ mres <|> mres')
+     (\(res, res') -> maybe
+       (fail . show $ IncoherentReturnTypes res res')
+       (return . Just)
+       (mergePGResults res res'))
+     (liftA2 (,) mres mres')
 
 -- | Parser for a function.
 pgFunction :: Parser PGFunction

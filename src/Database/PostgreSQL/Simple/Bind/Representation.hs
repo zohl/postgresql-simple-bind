@@ -18,7 +18,7 @@ module Database.PostgreSQL.Simple.Bind.Representation (
   , PGArgumentMode(..)
   , PGColumn(..)
   , PGResult(..)
-  , isPGTuple
+  , mergePGResults
   ) where
 
 
@@ -56,13 +56,22 @@ data PGColumn = PGColumn {
 
 -- | Representation of a function's return value.
 data PGResult
-  = PGSingle String
-  | PGSetOf  String
+  = PGSingle [String]
+  | PGSetOf  [String]
   | PGTable  [PGColumn]
-  | PGTuple  [String]
     deriving (Show, Eq)
 
--- | PGTuple indicator.
-isPGTuple :: PGResult -> Bool
-isPGTuple (PGTuple _) = True
-isPGTuple _           = False
+
+mergeTypes :: [String] -> [String] -> Maybe [String]
+mergeTypes ts ts' = 
+  if ts == ts' || ((length ts' > 1) && ts == ["record"])
+  then Just ts'
+  else Nothing
+
+-- | Merge 'PGResult' derived from RETURNING clause (first) and
+--   derived from arguments (second).
+mergePGResults :: PGResult -> PGResult -> Maybe PGResult
+mergePGResults (PGSingle ts) (PGSingle ts') = PGSingle <$> (mergeTypes ts ts')
+mergePGResults (PGSetOf  ts) (PGSetOf  ts') = PGSetOf  <$> (mergeTypes ts ts')
+mergePGResults (PGSetOf  ts) (PGSingle ts') = PGSetOf  <$> (mergeTypes ts ts')
+mergePGResults _             _              = Nothing

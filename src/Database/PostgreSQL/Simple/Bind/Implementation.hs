@@ -32,6 +32,7 @@ module Database.PostgreSQL.Simple.Bind.Implementation (
   , PostgresType
   ) where
 
+import Control.Arrow ((&&&), second)
 import Control.Exception (throw)
 import Control.Monad.Catch (MonadThrow, throwM)
 import Debug.Trace (traceIO)
@@ -130,42 +131,54 @@ mkContextT constraint typelit name = [
   , (ConT constraint) `AppT` VarT name
   ]
 
+
+mkResultColumnT :: Name -> String -> Q (Name, [Type])
+mkResultColumnT c t = (id &&& (mkContextT c t)) <$> newName "y"
+
+mkResultColumnsT :: Bool -> [(Name, [Type])] -> ([Name], [Type], Type)
+mkResultColumnsT _ = (\(ns, cs) -> (ns, cs, retClause ns)) . second concat . unzip where
+  retClause = \case
+    [n]-> VarT n
+    ns -> foldl AppT (TupleT (length ns)) (map VarT ns)
+
 -- | Examples:
---     (PGSingle "varchar") -> (["y"], [PostgresType "varchar" ~ y, FromField y], y)
---     (PGSetOf "varchar") -> (["y"], [PostgresType "varchar" ~ y, FromField y], [y])
+--     (PGSingle ["varchar"]) -> (["y"], [PostgresType "varchar" ~ y, FromField y], y)
+--     (PGSingle ["varchar", "bigint"]) -> (
+--         ["y", "z"]
+--       , [PostgresType "varchar" ~ y, FromField y, PostgresType "bigint" ~ z, FromField z]
+--       , (y, z))
+--     (PGSetOf ["varchar"]) -> (["y"], [PostgresType "varchar" ~ y, FromField y], [y])
 --     (PGTable ["bigint", "varchar"])  -> (
 --         ["y", "z"]
 --       , [PostgresType "bigint" ~ y, FromField y, PostgresType "varchar" ~ z, FromField z]
 --       , (y, z))
 mkResultT :: PostgresBindOptions -> String -> PGResult -> Q ([Name], [Type], Type)
-mkResultT _ _ (PGSingle t) = do
-  name <- newName "y"
-  return ([name], mkContextT ''FromField t name, VarT name)
 
-mkResultT (PostgresBindOptions {..}) _fname (PGSetOf tname) = do
-  name <- newName "y"
-  let constraint = case (pboSetOfReturnType tname) of
-        AsRow   -> ''FromRow
-        AsField -> ''FromField
-  return ([name], mkContextT constraint tname name, ListT `AppT` (VarT name))
+mkResultT _opt _fname (PGSingle ts) = mkResultColumnsT False <$> (mapM mkResultColumnT' ts) where
+  mkResultColumnT' = mkResultColumnT ''FromField
 
-mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
-  names <- sequence $ replicate (length cs) (newName "y")
-  let context = concat $
-        zipWith (\(PGColumn _ typelit) name -> mkContextT ''FromField typelit name) cs names
+-- mkResultT  opt _fname (PGSetOf ts)  = mkResultColumnsT <$> (mapM mkResultColumnT' ts) where
+--   mkResultColumnT' = (uncurry mkResultTColumntT) . (id &&& (mkConstraintT . (pboSetOfReturnType opt)))
+--   mkConstraintT = \case
+--     AsRow   -> ''FromRow
+--     AsField -> ''FromField
+-- 
+--   return ([name], mkContextT constraint tname name, ListT `AppT` (VarT name))
 
-  let wrapColumn (PGColumn cname _ctype) = case pboIsNullable fname cname of
-        True  -> AppT (ConT ''Maybe)
-        False -> id
 
-  let clause = AppT ListT $ foldl AppT (TupleT (length cs)) $
-        zipWith wrapColumn cs (map VarT names)
-
-  return (names, context, clause)
-
-mkResultT opt fname (PGTuple ts) = fmap
-  ((\(ns, cs, es) -> (concat ns, concat cs, foldl AppT (TupleT (length es)) es)) . unzip3)
-  $ mapM (mkResultT opt fname . PGSingle) ts
+-- mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
+--   names <- sequence $ replicate (length cs) (newName "y")
+--   let context = concat $
+--         zipWith (\(PGColumn _ typelit) name -> mkContextT ''FromField typelit name) cs names
+-- 
+--   let wrapColumn (PGColumn cname _ctype) = case pboIsNullable fname cname of
+--         True  -> AppT (ConT ''Maybe)
+--         False -> id
+-- 
+--   let clause = AppT ListT $ foldl AppT (TupleT (length cs)) $
+--         zipWith wrapColumn cs (map VarT names)
+-- 
+--   return (names, context, clause)
 
 -- | Example: [
 --     PGArgument { pgaName = "x", pgaType = "varchar", pgaOptional = True }
@@ -227,9 +240,8 @@ unwrapE' AsField q = (VarE 'fmap) `AppE` (VarE 'unwrapColumn) `AppE` q
 --     (PGTable  _) q -> { q }
 unwrapE :: PostgresBindOptions -> PGResult -> Exp -> Exp
 unwrapE _   (PGSingle _)    q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
-unwrapE opt (PGSetOf tname) q = unwrapE' (pboSetOfReturnType opt tname) q
-unwrapE _   (PGTable _)     q = unwrapE' AsRow q
-unwrapE _   (PGTuple _)     q = unwrapE' AsRow q
+-- unwrapE opt (PGSetOf tname) q = unwrapE' (pboSetOfReturnType opt tname) q
+-- unwrapE _   (PGTable _)     q = unwrapE' AsRow q
 
 
 wrapArg :: PostgresBindOptions -> PGArgument -> Name -> Exp
@@ -307,7 +319,7 @@ queryPrefix :: PostgresBindOptions -> PGFunction -> String
 queryPrefix PostgresBindOptions {..} PGFunction {..} = select ++ " " ++ function where
   select = case pgfResult of
     PGTable _     -> mkSelect AsRow
-    PGSetOf tname -> mkSelect $ pboSetOfReturnType tname
+--  PGSetOf tname -> mkSelect $ pboSetOfReturnType tname
     _             -> mkSelect AsField
 
   mkSelect AsRow   = "select * from"

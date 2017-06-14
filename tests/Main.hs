@@ -59,12 +59,12 @@ spec = do
     let test t = testParser pgResult t . Right
 
     it "works with simple types" $ do
-      test "bigint" $ PGSingle "bigint"
-      test "varchar" $ PGSingle "varchar"
+      test "bigint" $ PGSingle ["bigint"]
+      test "varchar" $ PGSingle ["varchar"]
 
     it "works with SETOF" $ do
-      test "setof bigint" $ PGSetOf "bigint"
-      test "SETOF bigint" $ PGSetOf "bigint"
+      test "setof bigint" $ PGSetOf ["bigint"]
+      test "SETOF bigint" $ PGSetOf ["bigint"]
 
     it "works with TABLE" $ do
       test "table (x bigint, y varchar)" $ PGTable [
@@ -191,7 +191,7 @@ spec = do
             pgfSchema = Nothing
           , pgfName   = "foo"
           , pgfArguments = []
-          , pgfResult = PGSingle "bigint"
+          , pgfResult = PGSingle ["bigint"]
           }
 
       test
@@ -202,7 +202,7 @@ spec = do
             pgfSchema = Nothing
           , pgfName   = "foo"
           , pgfArguments = []
-          , pgfResult = PGSingle "bigint"
+          , pgfResult = PGSingle ["bigint"]
           }
 
       test
@@ -214,7 +214,7 @@ spec = do
           , pgfName   = "foo"
           , pgfArguments = [
                 PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}]
-          , pgfResult = PGSingle "bigint"
+          , pgfResult = PGSingle ["bigint"]
           }
 
       test
@@ -229,7 +229,7 @@ spec = do
           , pgfArguments = [
                 PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}
               , PGArgument {pgaMode = def, pgaName = Just "p_baz", pgaType = "varchar", pgaOptional = False}]
-          , pgfResult = PGSingle "bigint"
+          , pgfResult = PGSingle ["bigint"]
           }
 
     it "works with qualified function names" $ do
@@ -241,7 +241,7 @@ spec = do
             pgfSchema = Just "test"
           , pgfName   = "foo"
           , pgfArguments = []
-          , pgfResult = PGSingle "bigint"
+          , pgfResult = PGSingle ["bigint"]
           }
 
     it "works with single OUT parameter" $ do
@@ -252,7 +252,7 @@ spec = do
             pgfSchema    = Nothing
           , pgfName      = "foo"
           , pgfArguments = []
-          , pgfResult    = PGSingle "bigint"
+          , pgfResult    = PGSingle ["bigint"]
           }
 
       test
@@ -263,9 +263,8 @@ spec = do
             pgfSchema    = Nothing
           , pgfName      = "foo"
           , pgfArguments = []
-          , pgfResult    = PGSingle "bigint"
+          , pgfResult    = PGSingle ["bigint"]
           }
-
 
     it "works with multiple OUT parameters" $ do
       test
@@ -275,7 +274,7 @@ spec = do
             pgfSchema    = Nothing
           , pgfName      = "foo"
           , pgfArguments = []
-          , pgfResult    = PGTuple ["bigint", "varchar"]
+          , pgfResult    = PGSingle ["bigint", "varchar"]
           }
 
       test
@@ -286,8 +285,32 @@ spec = do
             pgfSchema    = Nothing
           , pgfName      = "foo"
           , pgfArguments = []
-          , pgfResult    = PGTuple ["bigint", "varchar"]
+          , pgfResult    = PGSingle ["bigint", "varchar"]
           }
+
+    it "works with OUT parameters and SETOF notation" $ do
+      test
+        [str|create function foo(out p_result bigint)
+            |returns setof bigint as
+            |'select 42::bigint'|]
+        PGFunction {
+            pgfSchema    = Nothing
+          , pgfName      = "foo"
+          , pgfArguments = []
+          , pgfResult    = PGSetOf ["bigint"]
+          }
+
+      test
+        [str|create function foo(out p1 bigint, out p2 varchar)
+            |returns setof record as
+            |$$ select 42::bigint, 'test'::varchar $$|]
+        PGFunction {
+            pgfSchema    = Nothing
+          , pgfName      = "foo"
+          , pgfArguments = []
+          , pgfResult    = PGSetOf ["bigint", "varchar"]
+          }
+
 
   describe "pgFunction (incorrect declarations)" $ do
     let test t = testParser pgFunction t . Left
@@ -303,8 +326,15 @@ spec = do
             |returns timestamptz as
             |$$ select 42::bigint, 'test'::varchar $$|]
         (IncoherentReturnTypes
-          (PGSingle "timestamptz")
-          (PGTuple ["bigint", "varchar"]))
+          (PGSingle ["timestamptz"])
+          (PGSingle ["bigint", "varchar"]))
+
+      test
+        [str|create function foo(out p1 bigint)
+            |returns table (p1 bigint) as ''|]
+        (IncoherentReturnTypes
+          (PGTable [PGColumn {pgcName = "p1", pgcType = "bigint"}])
+          (PGSingle ["bigint"]))
 
     it "fails when VARIADIC variable followed by non-OUT variable" $ do
       test
