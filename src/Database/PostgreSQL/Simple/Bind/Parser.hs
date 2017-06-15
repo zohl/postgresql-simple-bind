@@ -34,6 +34,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgString
   , pgColumn
   , pgArgument
+  , pgArguments
   , pgArgumentMode
   , pgFunction
   , ParserException(..)
@@ -70,6 +71,9 @@ data ParserException
     -- ^ Thrown when string literal starts with non-supported symbol.
   | NonOutVariableAfterVariadic PGArgument
     -- ^ Thrown when encountered a non-OUT argument after VARIADIC one.
+  | DefaultValueExpected PGArgument
+    -- ^ Thrown when encountered an argument that must have
+    -- default value (i.e. after another argument with default value).
   deriving (Show)
 
 
@@ -240,6 +244,28 @@ pgArgument = do
               when (maybe False (not . inClass ",)") mc) $ fail "TODO"
               return False))
 
+-- | Parser for an argument list as in 'pg_catalog.pg_get_function_result'.
+pgArguments :: Bool -> Parser [PGArgument]
+pgArguments doCheck = do
+  args <- ((ss *> pgArgument <* ss) `sepBy` (char ','))
+  when (doCheck) $ do
+    checkExpectedDefaults args
+    checkVariadic args
+
+  return args where
+
+    checkExpectedDefaults :: [PGArgument] -> Parser ()
+    checkExpectedDefaults = maybe
+      (return ())
+      (fail . show . DefaultValueExpected)
+      . listToMaybe . dropWhile (pgaOptional) . dropWhile (not . pgaOptional)
+
+    checkVariadic :: [PGArgument] -> Parser ()
+    checkVariadic = maybe
+     (return ())
+     (fail . show . NonOutVariableAfterVariadic)
+     . listToMaybe . filter ((/= Out) . pgaMode) . tailSafe . snd . break ((== Variadic) . pgaMode)
+
 
 -- | Parser for 'pg_get_function_result' output.
 pgResult :: Parser PGResult
@@ -251,17 +277,9 @@ pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pg
 -- | Move 'Out' arguments to PGResult record.
 normalizeFunction :: [PGArgument] -> Maybe PGResult -> Parser ([PGArgument], PGResult)
 normalizeFunction args mr = do
-  checkVariadic
   let (iArgs, mres') = second mkResult $ splitArgs args
   r <- mergeResults mr mres' >>= maybe (fail . show $ NoReturnTypeInfo) return
   return (iArgs, r) where
-
-    checkVariadic :: Parser ()
-    checkVariadic = maybe
-     (return ())
-     (fail . show . NonOutVariableAfterVariadic)
-     . listToMaybe . filter ((/= Out) . pgaMode) . tailSafe . snd . break ((== Variadic) . pgaMode)
-     $ args
 
     splitArgs :: [PGArgument] -> ([PGArgument], [PGArgument])
     splitArgs = (filter ((/= Out) . pgaMode)) &&& (filter ((flip elem [Out, InOut]) . pgaMode))
@@ -288,7 +306,7 @@ pgFunction = do
         ((,) <$> (fmap (Just . T.unpack) $ pgIdentifier) <*> (char '.' *> (T.unpack <$> pgIdentifier)))
     <|> ((Nothing,) . T.unpack <$> pgIdentifier))
 
-  pgfArguments' <- ss *> char '(' *> ((ss *> pgArgument <* ss) `sepBy` (char ',')) <* char ')'
+  pgfArguments' <- ss *> char '(' *> pgArguments True  <* char ')'
   pgfResult'    <- ss *> (asciiCI "returns" *> ss *> (Just <$> pgResult)) <|> (return Nothing)
   _             <- ss *> "as" *> ss *> pgString
 
