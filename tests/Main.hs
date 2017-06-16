@@ -120,6 +120,14 @@ spec = do
       test "\"Grault\"\"123\"" $ "\"Grault\"\"123\""
       test "\"Waldo !@ #$\""   $ "\"Waldo !@ #$\""
 
+    it "fails when OUT or VARIADIC variable specified with default value" $ do
+      test "out p bigint default 1"
+        (DefaultValueNotExpected
+          PGArgument { pgaMode = Out, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
+      test "variadic p bigint default 1"
+        (DefaultValueNotExpected
+          PGArgument { pgaMode = Variadic, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
+
 
   describe "pgType" $ do
     let test t = testParser pgType t . Right

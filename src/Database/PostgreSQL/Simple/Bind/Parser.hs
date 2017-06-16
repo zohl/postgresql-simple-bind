@@ -43,7 +43,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
 
 import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
 import Control.Arrow ((&&&), second)
-import Control.Monad (when)
+import Control.Monad (when, void)
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
@@ -74,6 +74,9 @@ data ParserException
   | DefaultValueExpected PGArgument
     -- ^ Thrown when encountered an argument that must have
     -- default value (i.e. after another argument with default value).
+  | DefaultValueNotExpected PGArgument
+    -- ^ Thrown when encountered an argument that must NOT have
+    -- default value (i.e. VARIADIC or OUT).
   deriving (Show)
 
 
@@ -248,9 +251,11 @@ pgArgument = do
 pgArguments :: Bool -> Parser [PGArgument]
 pgArguments doCheck = do
   args <- ((ss *> pgArgument <* ss) `sepBy` (char ','))
-  when (doCheck) $ do
-    checkExpectedDefaults args
-    checkVariadic args
+  when (doCheck) $ void . sequence $ map ($ args) [
+      checkExpectedDefaults
+    , checkNotExpectedDefaults
+    , checkVariadic
+    ]
 
   return args where
 
@@ -259,6 +264,12 @@ pgArguments doCheck = do
       (return ())
       (fail . show . DefaultValueExpected)
       . listToMaybe . dropWhile (pgaOptional) . dropWhile (not . pgaOptional)
+
+    checkNotExpectedDefaults :: [PGArgument] -> Parser ()
+    checkNotExpectedDefaults = maybe
+      (return ())
+      (fail . show . DefaultValueNotExpected)
+      . listToMaybe . filter (\a -> (pgaMode a `elem` [Out, Variadic]) && (pgaOptional a))
 
     checkVariadic :: [PGArgument] -> Parser ()
     checkVariadic = maybe
