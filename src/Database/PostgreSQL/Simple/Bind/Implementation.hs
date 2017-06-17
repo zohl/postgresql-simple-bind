@@ -131,15 +131,19 @@ mkContextT constraint typelit name = [
   , (ConT constraint) `AppT` VarT name
   ]
 
-
 mkResultColumnT :: Name -> String -> Q (Name, [Type])
 mkResultColumnT c t = (id &&& (mkContextT c t)) <$> newName "y"
 
-mkResultColumnsT :: Bool -> [(Name, [Type])] -> ([Name], [Type], Type)
-mkResultColumnsT _ = (\(ns, cs) -> (ns, cs, retClause ns)) . second concat . unzip where
-  retClause = \case
-    [n]-> VarT n
-    ns -> foldl AppT (TupleT (length ns)) (map VarT ns)
+mkReturnClauseT :: Bool -> [Type] -> Type
+mkReturnClauseT isMultiple = (if isMultiple then (AppT ListT) else id) . \case
+  [t] -> t
+  ts  -> foldl AppT (TupleT (length ts)) (ts)
+
+mkResultT' :: (t -> Q (Name, [Type])) -> ([Name] -> Type) -> [t] -> Q ([Name], [Type], Type)
+mkResultT' mkResultColumnT' mkReturnClauseT' ts = do
+  (ns, cs) <- fmap (second concat . unzip) $ (mapM mkResultColumnT' ts)
+  let clause = mkReturnClauseT' ns
+  return (ns, cs, clause)
 
 -- | Examples:
 --     (PGSingle ["varchar"]) -> (["y"], [PostgresType "varchar" ~ y, FromField y], y)
@@ -154,31 +158,24 @@ mkResultColumnsT _ = (\(ns, cs) -> (ns, cs, retClause ns)) . second concat . unz
 --       , (y, z))
 mkResultT :: PostgresBindOptions -> String -> PGResult -> Q ([Name], [Type], Type)
 
-mkResultT _opt _fname (PGSingle ts) = mkResultColumnsT False <$> (mapM mkResultColumnT' ts) where
+mkResultT _opt _fname (PGSingle ts) = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
   mkResultColumnT' = mkResultColumnT ''FromField
+  mkReturnClauseT' = mkReturnClauseT False . map VarT
 
--- mkResultT  opt _fname (PGSetOf ts)  = mkResultColumnsT <$> (mapM mkResultColumnT' ts) where
---   mkResultColumnT' = (uncurry mkResultTColumntT) . (id &&& (mkConstraintT . (pboSetOfReturnType opt)))
---   mkConstraintT = \case
---     AsRow   -> ''FromRow
---     AsField -> ''FromField
--- 
---   return ([name], mkContextT constraint tname name, ListT `AppT` (VarT name))
+mkResultT  opt _fname (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
+  mkResultColumnT' = (uncurry mkResultColumnT) . ((mkConstraintT . (pboSetOfReturnType opt)) &&& id)
+  mkReturnClauseT' = mkReturnClauseT True . map VarT
+  mkConstraintT = \case
+    AsRow   -> ''FromRow
+    AsField -> ''FromField
 
+mkResultT opt fname (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' cols where
+  mkResultColumnT' = mkResultColumnT ''FromField . pgcType
+  mkReturnClauseT' = mkReturnClauseT True . zipWith wrapColumn cols
+  wrapColumn c t = if (pboIsNullable opt fname . pgcName $ c)
+                   then (ConT ''Maybe) `AppT` (VarT t)
+                   else VarT t
 
--- mkResultT (PostgresBindOptions {..}) fname (PGTable cs) = do
---   names <- sequence $ replicate (length cs) (newName "y")
---   let context = concat $
---         zipWith (\(PGColumn _ typelit) name -> mkContextT ''FromField typelit name) cs names
--- 
---   let wrapColumn (PGColumn cname _ctype) = case pboIsNullable fname cname of
---         True  -> AppT (ConT ''Maybe)
---         False -> id
--- 
---   let clause = AppT ListT $ foldl AppT (TupleT (length cs)) $
---         zipWith wrapColumn cs (map VarT names)
--- 
---   return (names, context, clause)
 
 -- | Example: [
 --     PGArgument { pgaName = "x", pgaType = "varchar", pgaOptional = True }
