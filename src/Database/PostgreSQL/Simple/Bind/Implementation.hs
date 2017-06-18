@@ -131,6 +131,10 @@ mkContextT constraint typelit name = [
   , (ConT constraint) `AppT` VarT name
   ]
 
+mkConstraintT :: ReturnType -> Name
+mkConstraintT AsRow   = ''FromRow
+mkConstraintT AsField = ''FromField
+
 mkResultColumnT :: Name -> String -> Q (Name, [Type])
 mkResultColumnT c t = (id &&& (mkContextT c t)) <$> newName "y"
 
@@ -163,11 +167,11 @@ mkResultT _opt _fname (PGSingle ts) = mkResultT' mkResultColumnT' mkReturnClause
   mkReturnClauseT' = mkReturnClauseT False . map VarT
 
 mkResultT  opt _fname (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
-  mkResultColumnT' = (uncurry mkResultColumnT) . ((mkConstraintT . (pboSetOfReturnType opt)) &&& id)
+  mkResultColumnT' = mkResultColumnT
+    (case ts of
+        [t] -> mkConstraintT . pboSetOfReturnType opt $ t
+        _   -> ''FromRow)
   mkReturnClauseT' = mkReturnClauseT True . map VarT
-  mkConstraintT = \case
-    AsRow   -> ''FromRow
-    AsField -> ''FromField
 
 mkResultT opt fname (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' cols where
   mkResultColumnT' = mkResultColumnT ''FromField . pgcType
@@ -236,9 +240,10 @@ unwrapE' AsField q = (VarE 'fmap) `AppE` (VarE 'unwrapColumn) `AppE` q
 --     (PGSetOf  _) q -> { unwrapColumn q }
 --     (PGTable  _) q -> { q }
 unwrapE :: PostgresBindOptions -> PGResult -> Exp -> Exp
-unwrapE _   (PGSingle _)    q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
--- unwrapE opt (PGSetOf tname) q = unwrapE' (pboSetOfReturnType opt tname) q
--- unwrapE _   (PGTable _)     q = unwrapE' AsRow q
+unwrapE _   (PGSingle _)  q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
+unwrapE opt (PGSetOf [t]) q = unwrapE' (pboSetOfReturnType opt t) q
+unwrapE _   (PGSetOf   _) q = unwrapE' AsRow q
+unwrapE _   (PGTable _)   q = unwrapE' AsRow q
 
 
 wrapArg :: PostgresBindOptions -> PGArgument -> Name -> Exp
@@ -316,7 +321,8 @@ queryPrefix :: PostgresBindOptions -> PGFunction -> String
 queryPrefix PostgresBindOptions {..} PGFunction {..} = select ++ " " ++ function where
   select = case pgfResult of
     PGTable _     -> mkSelect AsRow
---  PGSetOf tname -> mkSelect $ pboSetOfReturnType tname
+    PGSetOf [t]   -> mkSelect . pboSetOfReturnType $ t
+    PGSetOf _     -> mkSelect AsRow
     _             -> mkSelect AsField
 
   mkSelect AsRow   = "select * from"
