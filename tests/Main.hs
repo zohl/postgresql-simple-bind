@@ -319,6 +319,23 @@ spec = do
           , pgfResult    = PGSetOf ["bigint", "varchar"]
           }
 
+    it "works with different properties" $ do
+      let test' s = test s PGFunction {
+            pgfSchema    = Nothing
+          , pgfName      = "foo"
+          , pgfArguments = []
+          , pgfResult    = PGSingle ["void"]
+          }
+
+      test'
+        [str|create function foo() returns void as '' language 'sql'|]
+
+      test'
+        [str|create function foo() returns void as '' language plpgsql|]
+
+      test'
+        [str|create function foo() returns void as 'test.o', 'foo' language C|]
+
 
   describe "pgFunction (incorrect declarations)" $ do
     let test t = testParser pgFunction t . Left

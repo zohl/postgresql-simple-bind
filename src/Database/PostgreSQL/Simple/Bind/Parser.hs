@@ -43,7 +43,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
 
 import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
 import Control.Arrow ((&&&), second)
-import Control.Monad (when, void)
+import Control.Monad (when, void, liftM2)
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
@@ -129,12 +129,17 @@ pgString = anyChar >>= \case
    c    -> fail . show $ QuoteNotSupported c
 
 
+-- | Parser for a non-quoted identifier.
+pgNormalIdentifier :: Parser Text
+pgNormalIdentifier = T.toLower <$> liftA2 T.cons
+  (satisfy $ inClass "a-zA-Z_")
+  (takeWhile $ inClass "a-zA-Z0-9_$")
+
+
 -- | Parser for a generic identifier.
 pgIdentifier :: Parser Text
 pgIdentifier = ((char '"') *> (pgQuotedString '"')) <|> pgNormalIdentifier where
-  pgNormalIdentifier = T.toLower <$> liftA2 T.cons
-    (satisfy $ inClass "a-zA-Z_")
-    (takeWhile $ inClass "a-zA-Z0-9_$")
+
 
 -- | Parser for a type.
 pgType :: Parser (Text, Maybe Text)
@@ -309,6 +314,17 @@ normalizeFunction args mr = do
        (mergePGResults res res'))
      (liftA2 (,) mres mres')
 
+-- | Parser for a function property.
+pgFunctionProperty :: Parser ()
+pgFunctionProperty =
+      language       *> pure ()
+  <|> loadableObject *> pure ()
+  <|> definition     *> pure ()
+  where
+    language       = asciiCI "language" *> ss *> (pgNormalIdentifier <|> (char '\'' *> pgQuotedString '\''))
+    loadableObject = asciiCI "as" *> ss *> pgString *> ss *> char ',' *> ss *> pgString
+    definition     = asciiCI "as" *> ss *> pgString
+
 -- | Parser for a function.
 pgFunction :: Parser PGFunction
 pgFunction = do
@@ -317,12 +333,12 @@ pgFunction = do
         ((,) <$> (fmap (Just . T.unpack) $ pgIdentifier) <*> (char '.' *> (T.unpack <$> pgIdentifier)))
     <|> ((Nothing,) . T.unpack <$> pgIdentifier))
 
-  pgfArguments' <- ss *> char '(' *> pgArguments True  <* char ')'
-  pgfResult'    <- ss *> (asciiCI "returns" *> ss *> (Just <$> pgResult)) <|> (return Nothing)
-  _             <- ss *> "as" *> ss *> pgString
+  (pgfArguments, pgfResult) <- liftM2 (,)
+    (ss *> char '(' *> pgArguments True  <* char ')')
+    (ss *> (asciiCI "returns" *> ss *> (Just <$> pgResult)) <|> (return Nothing))
+    >>= uncurry normalizeFunction
 
-  (pgfArguments, pgfResult) <- normalizeFunction pgfArguments' pgfResult'
-
+  _ <- ss *> (pgFunctionProperty `sepBy` ss)
   return PGFunction {..}
 
 
