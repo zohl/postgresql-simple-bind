@@ -104,6 +104,28 @@ spec = do
       test "          timestamp with time zone"                           r
 
 
+  describe "pgArguments (incorrect declarations)" $ do
+    let test t = testParser (pgArguments True) t . Left
+
+    it "fails when an optional argument is followed by mandatory one" $ do
+      test "p1 bigint, p2 varchar default 'foo', p3 varchar"
+        (DefaultValueExpected
+          PGArgument { pgaMode = In, pgaName = Just "p3", pgaType = "varchar", pgaOptional = False })
+
+    it "fails when VARIADIC variable followed by non-OUT variable" $ do
+      test "variadic p1 bigint, out p2 varchar, in p3 varchar"
+        (NonOutVariableAfterVariadic
+          PGArgument { pgaMode = In, pgaName = Just "p3", pgaType = "varchar", pgaOptional = False })
+
+    it "fails when OUT or VARIADIC variable specified with default value" $ do
+      test "out p bigint default 1"
+        (DefaultValueNotExpected
+          PGArgument { pgaMode = Out, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
+      test "variadic p bigint default 1"
+        (DefaultValueNotExpected
+          PGArgument { pgaMode = Variadic, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
+
+
   describe "pgIdentifier" $ do
     let test t = testParser pgIdentifier t . Right
     it "works with simple identifiers" $ do
@@ -119,14 +141,6 @@ spec = do
       test "\"Corge\""         $ "\"Corge\""
       test "\"Grault\"\"123\"" $ "\"Grault\"\"123\""
       test "\"Waldo !@ #$\""   $ "\"Waldo !@ #$\""
-
-    it "fails when OUT or VARIADIC variable specified with default value" $ do
-      test "out p bigint default 1"
-        (DefaultValueNotExpected
-          PGArgument { pgaMode = Out, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
-      test "variadic p bigint default 1"
-        (DefaultValueNotExpected
-          PGArgument { pgaMode = Variadic, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
 
 
   describe "pgType" $ do
@@ -360,10 +374,3 @@ spec = do
         (IncoherentReturnTypes
           (PGTable [PGColumn {pgcName = "p1", pgcType = "bigint"}])
           (PGSingle ["bigint"]))
-
-    it "fails when VARIADIC variable followed by non-OUT variable" $ do
-      test
-        [str|create function foo(variadic p1 bigint, out p2 varchar, in p3 varchar)
-            |returns varchar as ''|]
-        (NonOutVariableAfterVariadic
-          PGArgument { pgaMode = In, pgaName = Just "p3", pgaType = "varchar", pgaOptional = False })
