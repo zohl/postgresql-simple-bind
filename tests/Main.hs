@@ -341,15 +341,26 @@ spec = do
           , pgfResult    = PGSingle ["void"]
           }
 
-      test'
-        [str|create function foo() returns void as '' language 'sql'|]
+      test' [str|create function foo() returns void as '' language 'sql'|]
+      test' [str|create function foo() returns void as '' language plpgsql|]
 
-      test'
-        [str|create function foo() returns void as '' language plpgsql|]
+      test' [str|create function foo() returns void as 'test.o', 'foo' language C|]
 
-      test'
-        [str|create function foo() returns void as 'test.o', 'foo' language C|]
+      test' [str|create function foo() returns void as '' window|]
 
+      test' [str|create function foo() returns void as '' immutable|]
+      test' [str|create function foo() returns void as '' stable|]
+      test' [str|create function foo() returns void as '' volatile|]
+
+      test' [str|create function foo() returns void as '' leakproof|]
+      test' [str|create function foo() returns void as '' not leakproof|]
+
+      test' [str|create function foo() returns void as '' called on null input|]
+      test' [str|create function foo() returns void as '' returns null on null input|]
+      test' [str|create function foo() returns void as '' strict|]
+
+      test' [str|create function foo() returns void as '' external security invoker|]
+      test' [str|create function foo() returns void as '' security definer|]
 
   describe "pgFunction (incorrect declarations)" $ do
     let test t = testParser pgFunction t . Left

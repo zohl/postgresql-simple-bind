@@ -320,10 +320,23 @@ pgFunctionProperty =
       language       *> pure ()
   <|> loadableObject *> pure ()
   <|> definition     *> pure ()
+  <|> window         *> pure ()
+  <|> behaviour      *> pure ()
+  <|> leakproof      *> pure ()
+  <|> strictness     *> pure ()
+  <|> security       *> pure ()
   where
     language       = asciiCI "language" *> ss *> (pgNormalIdentifier <|> (char '\'' *> pgQuotedString '\''))
     loadableObject = asciiCI "as" *> ss *> pgString *> ss *> char ',' *> ss *> pgString
     definition     = asciiCI "as" *> ss *> pgString
+    window         = asciiCI "window"
+    behaviour      = asciiCI "immutable" <|> asciiCI "stable" <|> asciiCI "volatile"
+    leakproof      = ((asciiCI "not" *> ss *> pure ()) <|> pure ()) *> asciiCI "leakproof"
+    strictness     = asciiCIs ["called", "on", "null", "input"]
+                 <|> asciiCIs ["returns", "null", "on", "null", "input"]
+                 <|> asciiCI "strict" *> pure ()
+    security       = ((asciiCI "external" *> ss *> pure ()) <|> pure ())
+                  *> asciiCI "security" *> ss *> (asciiCI "invoker" <|> asciiCI "definer")
 
 -- | Parser for a function.
 pgFunction :: Parser PGFunction
