@@ -325,6 +325,9 @@ pgFunctionProperty =
   <|> leakproof      *> pure ()
   <|> strictness     *> pure ()
   <|> security       *> pure ()
+  <|> parallel       *> pure ()
+  <|> cost           *> pure ()
+  <|> rows           *> pure ()
   where
     language       = asciiCI "language" *> ss *> (pgNormalIdentifier <|> (char '\'' *> pgQuotedString '\''))
     loadableObject = asciiCI "as" *> ss *> pgString *> ss *> char ',' *> ss *> pgString
@@ -337,6 +340,9 @@ pgFunctionProperty =
                  <|> asciiCI "strict" *> pure ()
     security       = ((asciiCI "external" *> ss *> pure ()) <|> pure ())
                   *> asciiCI "security" *> ss *> (asciiCI "invoker" <|> asciiCI "definer")
+    parallel       = asciiCI "parallel" *> ss *> (asciiCI "unsafe" <|> asciiCI "restricted" <|> asciiCI "safe")
+    cost           = asciiCI "cost" *> ss *> (decimal :: Parser Int)
+    rows           = asciiCI "rows" *> ss *> (decimal :: Parser Int)
 
 -- | Parser for a function.
 pgFunction :: Parser PGFunction

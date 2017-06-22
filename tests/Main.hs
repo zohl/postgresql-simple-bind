@@ -362,6 +362,14 @@ spec = do
       test' [str|create function foo() returns void as '' external security invoker|]
       test' [str|create function foo() returns void as '' security definer|]
 
+      test' [str|create function foo() returns void as '' parallel unsafe|]
+      test' [str|create function foo() returns void as '' parallel restricted|]
+      test' [str|create function foo() returns void as '' parallel safe|]
+
+      test' [str|create function foo() returns void as '' cost 100|]
+
+      test' [str|create function foo() returns void as '' rows 100|]
+
   describe "pgFunction (incorrect declarations)" $ do
     let test t = testParser pgFunction t . Left
 
