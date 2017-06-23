@@ -344,6 +344,10 @@ pgFunctionProperty =
     cost           = asciiCI "cost" *> ss *> (decimal :: Parser Int)
     rows           = asciiCI "rows" *> ss *> (decimal :: Parser Int)
 
+-- | Parser for an obsolete function property (WITH clause).
+pgFunctionObsoleteProperty :: Parser ()
+pgFunctionObsoleteProperty = (asciiCI "isStrict" <|> asciiCI "isCachable") *> pure ()
+
 -- | Parser for a function.
 pgFunction :: Parser PGFunction
 pgFunction = do
@@ -358,6 +362,8 @@ pgFunction = do
     >>= uncurry normalizeFunction
 
   _ <- ss *> (pgFunctionProperty `sepBy` ss)
+  _ <- ss *> (asciiCI "with" *> ((ss *> pgFunctionObsoleteProperty <* ss) `sepBy` (char ',')) *> pure ()) <|> pure ()
+
   return PGFunction {..}
 
 

@@ -370,6 +370,9 @@ spec = do
 
       test' [str|create function foo() returns void as '' rows 100|]
 
+      test' [str|create function foo() returns void as '' with isStrict|]
+      test' [str|create function foo() returns void as '' with isCachable, isStrict|]
+
   describe "pgFunction (incorrect declarations)" $ do
     let test t = testParser pgFunction t . Left
 
