@@ -1,5 +1,5 @@
-{ mkDerivation, attoparsec, base, bytestring, data-default
-, directory, exceptions, filepath, heredoc, hspec
+{ mkDerivation, attoparsec, base, bytestring, case-conversion
+, data-default, directory, exceptions, filepath, heredoc, hspec
 , postgresql-simple, safe, stdenv, template-haskell, text, time
 , transformers
 }:
@@ -13,8 +13,8 @@ mkDerivation {
     transformers
   ];
   testHaskellDepends = [
-    attoparsec base bytestring data-default exceptions heredoc hspec
-    postgresql-simple text
+    attoparsec base bytestring case-conversion data-default directory
+    exceptions filepath heredoc hspec postgresql-simple text
   ];
   description = "FFI-like bindings for PostgreSQL stored functions";
   license = stdenv.lib.licenses.bsd3;

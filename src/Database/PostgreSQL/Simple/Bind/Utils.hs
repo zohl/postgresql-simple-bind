@@ -54,17 +54,12 @@ import qualified Data.Text.IO as T
 bindFunctionsFromText :: PostgresBindOptions -> Text -> Q [Dec]
 bindFunctionsFromText opt s = parsePGFunction s >>= bindFunction opt
 
--- TODO: merge with 'bindFunctionsFromText'
-bindFunctionsFromText' :: PostgresBindOptions -> Text -> Q [Dec]
-bindFunctionsFromText' opt = bindFunctionsFromText opt
-  . fst . T.breakOn " as" . snd . T.breakOnEnd "create "
-
 -- | Bind functions found in specified file.
 bindFunctionsFromFile :: PostgresBindOptions -> FilePath -> Q [Dec]
 bindFunctionsFromFile opt fn = do
   addDependentFile fn
   runIO (T.readFile fn)
-    >>= bindFunctionsFromText' opt
+    >>= bindFunctionsFromText opt
 
 -- | Bind functions found in all files in specified directory.
 bindFunctionsFromDirectory :: PostgresBindOptions -> FilePath -> Q [Dec]
