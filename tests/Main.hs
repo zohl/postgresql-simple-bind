@@ -104,6 +104,14 @@ spec = do
       test "          timestamp with time zone"                           r
 
 
+  describe "pgArguments" $ do
+    let test t = testParser (pgArguments True) t . Right
+    it "works with mixed arguments" $ do
+      test "in p1 bigint default 'test', out p2 varchar" [
+          PGArgument { pgaMode = In,  pgaName = Just "p1", pgaType = "bigint",  pgaOptional = True }
+        , PGArgument { pgaMode = Out, pgaName = Just "p2", pgaType = "varchar", pgaOptional = False }]
+
+
   describe "pgArguments (incorrect declarations)" $ do
     let test t = testParser (pgArguments True) t . Left
 

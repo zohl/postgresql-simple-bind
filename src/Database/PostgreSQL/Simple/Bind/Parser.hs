@@ -269,6 +269,7 @@ pgArguments doCheck = do
       (return ())
       (fail . show . DefaultValueExpected)
       . listToMaybe . dropWhile (pgaOptional) . dropWhile (not . pgaOptional)
+      . filter (\a -> (pgaMode a) `elem` [In, InOut])
 
     checkNotExpectedDefaults :: [PGArgument] -> Parser ()
     checkNotExpectedDefaults = maybe
