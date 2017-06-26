@@ -170,7 +170,7 @@ mkResultT  opt _fname (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClause
   mkResultColumnT' = mkResultColumnT
     (case ts of
         [t] -> mkConstraintT . pboSetOfReturnType opt $ t
-        _   -> ''FromRow)
+        _   -> ''FromField)
   mkReturnClauseT' = mkReturnClauseT True . map VarT
 
 mkResultT opt fname (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' cols where

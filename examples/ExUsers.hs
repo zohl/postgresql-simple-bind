@@ -39,7 +39,7 @@ type instance PostgresType "varchar2" = Text
 
 data User = User {
     userId   :: Int
-  , userName :: String
+  , userName :: Text
   , userAge  :: Int
   } deriving (Eq, Show, Generic)
 
@@ -61,7 +61,10 @@ specUsers conn = describe "Users example" $ it "works" $ do
     , userAge  = 42
     })
 
-  sqlGetUsers conn Nothing >>= shouldBe [mrFooId, mrBarId, mrBazId] . map userId
+  users <- sqlGetUsers conn Nothing
+  (map userId users) `shouldBe` [mrFooId, mrBarId, mrBazId]
+  sqlGetUsersEx conn Nothing >>= shouldBe (map (\User {..} -> (userId, userName, userAge)) users)
+
   sqlGetUsers conn (Just "Mr. Ba_") >>= shouldBe [mrBarId, mrBazId] . map userId
   sqlDelUser conn mrBarId
 
