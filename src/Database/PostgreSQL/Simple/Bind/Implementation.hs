@@ -92,33 +92,6 @@ instance Show Argument where
     , argType arg
     ]
 
--- untypedPlaceholder, typedPlaceholder :: String -> String
--- untypedPlaceholder = const "?"
--- typedPlaceholder atype = "(?)::" ++ atype
-
-
--- formatArgument :: String -> (String -> String) -> Argument -> Maybe String
--- formatArgument callSyntax placeholder = format where
---   format = \case
---     MandatoryArg {..} -> Just $ placeholder argType
---     OptionalArg {..} -> fmap
---       (const . concat $ [argName, callSyntax, placeholder argType])
---       morgValue
---
---
--- formatArguments :: String -> (String -> String) -> [Argument] -> String
--- formatArguments callSyntax placeholder = concat
---   . (intersperse ", ")
---   . catMaybes
---   . (map $ formatArgument callSyntax placeholder)
---
---
--- filterArguments :: [Argument] -> [Argument]
--- filterArguments = filter isPresented where
---   isPresented :: Argument -> Bool
---   isPresented (OptionalArg {..}) = maybe False (const True) $ morgValue
---   isPresented _                  = True
-
 
 -- | Example: "varchar" -> PostgresType "varchar"
 postgresT :: String -> Type
@@ -296,9 +269,13 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
                  (if null varNames then [] else [traceE $ VarE argsName])
             else []
 
+  explicitCasts   <- lift pboExplicitCasts
+  olderCallSyntax <- lift pboOlderCallSyntax
   let queryBindings = BindS
         (TupP [VarP sqlQueryName, VarP refinedArgsName])
         ((VarE 'prepareQuery)
+          `AppE` explicitCasts
+          `AppE` olderCallSyntax
           `AppE` (LitE . StringL $ queryPrefix opt f)
           `AppE` specs
           `AppE` (VarE argsName))
@@ -333,26 +310,73 @@ queryPrefix PostgresBindOptions {..} PGFunction {..} = select ++ " " ++ function
     (++ ("." ++ pgfName))
     pgfSchema
 
--- TODO:
--- - type casting
--- - (=>) (:=)
--- - throwing exception
-runFormatter :: (MonadThrow m) => Bool -> [(PGArgument, Argument)] -> m [(Builder, Argument)]
-runFormatter _ [] = return []
-runFormatter o ((PGArgument {..}, arg):rest) = case arg of
-  MandatoryArg {..} -> ((char8 '?', arg):) <$> (runFormatter o rest)
+
+
+-- untypedPlaceholder, typedPlaceholder :: String -> String
+-- untypedPlaceholder = const "?"
+-- typedPlaceholder atype = "(?)::" ++ atype
+
+
+-- formatArgument :: String -> (String -> String) -> Argument -> Maybe String
+-- formatArgument callSyntax placeholder = format where
+--   format = \case
+--     MandatoryArg {..} -> Just $ placeholder argType
+--     OptionalArg {..} -> fmap
+--       (const . concat $ [argName, callSyntax, placeholder argType])
+--       morgValue
+--
+--
+-- formatArguments :: String -> (String -> String) -> [Argument] -> String
+-- formatArguments callSyntax placeholder = concat
+--   . (intersperse ", ")
+--   . catMaybes
+--   . (map $ formatArgument callSyntax placeholder)
+--
+--
+-- filterArguments :: [Argument] -> [Argument]
+-- filterArguments = filter isPresented where
+--   isPresented :: Argument -> Bool
+--   isPresented (OptionalArg {..}) = maybe False (const True) $ morgValue
+--   isPresented _                  = True
+
+
+formatArgument :: Bool -> PGArgument -> Builder
+formatArgument True  a = byteString "(?)::" <> (byteString . BSC8.pack . pgaType $ a)
+formatArgument False _ = char8 '?'
+
+formatAssingment :: Bool -> String -> Builder
+formatAssingment ocs name = (byteString . BSC8.pack $ name) <> byteString (if ocs then ":=" else "=>")
+
+runFormatter
+  :: Bool                     -- ^ Explicit casts.
+  -> Bool                     -- ^ Older call syntax.
+  -> Bool                     -- ^ Was optional argument omitted?
+  -> [(PGArgument, Argument)] -- ^ Arguments with metadata.
+  -> Maybe [(Builder, Argument)]
+runFormatter _ _ _ [] = return []
+runFormatter ec ocs o ((pga, arg):rest) = case arg of
+  MandatoryArg {..} -> ((formatArgument ec pga, arg):) <$> (runFormatter ec ocs o rest)
   OptionalArg  {..} -> case morgValue of
-    Nothing  -> runFormatter True rest
-    (Just _) -> case pgaName of
+    Nothing  -> runFormatter ec ocs True rest
+    (Just _) -> case (pgaName pga) of
       Nothing -> if o
-        then throwM (IncorrectInvocation "") -- . BSC8.unpack . BS.toStrict . toLazyByteString $ prefix)
-        else ((char8 '?', arg):) <$> (runFormatter o rest)
-      (Just name) -> (((byteString . BSC8.pack $ name) <> byteString " => ?", arg):) <$> (runFormatter o rest)
+        then Nothing
+        else ((char8 '?', arg):) <$> (runFormatter ec ocs o rest)
+      (Just name) -> ((formatAssingment ocs name <> (formatArgument ec pga), arg):)
+                 <$> (runFormatter ec ocs o rest)
 
-
-prepareQuery :: (MonadThrow m) => Builder -> [PGArgument] -> [Argument] -> m (Query, [Argument])
-prepareQuery prefix specs args = do
-  (argsString, refinedArgs) <- unzip <$> runFormatter False (zip specs args)
+prepareQuery :: (MonadThrow m)
+  => Bool          -- ^ Explicit casts.
+  -> Bool          -- ^ Older call syntax.
+  -> Builder       -- ^ Query prefix.
+  -> [PGArgument]  -- ^ Arguments to format.
+  -> [Argument]
+  -> m (Query, [Argument])
+prepareQuery ec ocs prefix specs args = do
+  (argsString, refinedArgs) <- maybe
+    (throwM (IncorrectInvocation . show $ (specs, args)))
+    (return)
+    (unzip <$> runFormatter ec ocs False (zip specs args))
   let sqlQuery = mconcat [
           prefix, char8 '(', mconcat . intersperse (char8 ',') $ argsString, char8 ')']
   return (Query . BS.toStrict . toLazyByteString $ sqlQuery, refinedArgs)
