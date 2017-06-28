@@ -372,5 +372,5 @@ pgFunction = do
 parsePGFunction :: (MonadThrow m) => Text -> m PGFunction
 parsePGFunction s = either
   (\err -> throwM . ParserFailed . concat $ ["In declaration `", T.unpack s, "`: ", err])
-  return
+  (return)
   (parseOnly (ss *> pgFunction) s) where

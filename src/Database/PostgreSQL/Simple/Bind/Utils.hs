@@ -12,6 +12,7 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE RecordWildCards            #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Utils
@@ -35,12 +36,16 @@ module Database.PostgreSQL.Simple.Bind.Utils (
 
 
 import Control.Arrow ((***))
+import Control.Monad (liftM2)
+import Control.Monad.Catch(throwM)
+import Data.Attoparsec.Text (parseOnly)
 import Data.List (intersperse)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, Only(..), query)
-import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), unwrapColumn)
+import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), unwrapColumn, PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Implementation (bindFunction)
-import Database.PostgreSQL.Simple.Bind.Parser (parsePGFunction)
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
+import Database.PostgreSQL.Simple.Bind.Parser (parsePGFunction, pgArguments, pgResult)
 import Language.Haskell.TH.Syntax (Q, Dec, addDependentFile, runIO)
 import Text.Heredoc (str)
 import System.Directory (doesDirectoryExist, listDirectory)
@@ -74,29 +79,29 @@ bindFunctionsFromDirectory bindOptions fn = do
           . fmap (fn </>)
 
 -- | Bind functions with specified name from the database.
-bindFunctionsFromDB :: PostgresBindOptions -> Connection -> String -> Q [Dec]
-bindFunctionsFromDB opt conn name = (runIO getDetails)
-  >>= fmap concat
-  . mapM (bindFunctionsFromText opt)
-  . fmap (uncurry mkDeclaration) where
-
-  getDetails :: IO [(Text, Text)]
-  getDetails = query conn sql' (Only . T.pack $ name)
+bindFunctionsFromDB :: PostgresBindOptions -> Connection -> Maybe String -> String -> Q [Dec]
+bindFunctionsFromDB opt conn pgfSchema pgfName = (runIO fetchFunction)
+                                             >>= fmap concat . mapM (bindFunction opt) where
+  fetchFunction = (query conn sql' (pgfSchema, pgfName))
+              >>= mapM (uncurry (liftM2 (,)) . (parse (pgArguments False) *** parse pgResult))
+              >>= mapM (\(pgfArguments, pgfResult) -> return PGFunction {..})
 
   sql' = [sql|
       select pg_catalog.pg_get_function_arguments(p.oid)
            , pg_catalog.pg_get_function_result(p.oid)
       from pg_catalog.pg_proc p
            left join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-      where p.proname ~ ('^('|| ? ||')$')
+      where n.nspname = coalesce(?, n.nspname)
+        and p.proname ~ ('^('|| ? ||')$')
         and not p.proisagg
         and not p.proiswindow
         and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
     |]
 
-  mkDeclaration :: Text -> Text -> Text
-  mkDeclaration args ret = T.concat $ ["function (", args, ") returns ", ret]
-
+  parse p s = either
+    (\err -> throwM . ParserFailed . concat $ ["In declaration `", T.unpack s, "`: ", err])
+    (return)
+    (parseOnly p s)
 
 -- | Fetch function declaration(s) from database.
 getFunctionDeclaration :: Connection -> String -> IO [String]
