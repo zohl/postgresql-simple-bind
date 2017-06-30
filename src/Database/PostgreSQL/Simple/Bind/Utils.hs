@@ -13,6 +13,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE LambdaCase                 #-}
 
 {-|
   Module:      Database.PostgreSQL.Simple.Bind.Utils
@@ -29,14 +30,16 @@ module Database.PostgreSQL.Simple.Bind.Utils (
     bindFunctionsFromText
   , bindFunctionsFromFile
   , bindFunctionsFromDirectory
+  , bindFunctionsFromDirectoryRecursive
   , bindFunctionsFromDB
   ) where
 
 
-import Control.Arrow ((***))
+import Control.Arrow ((***), (&&&), first, second)
 import Control.Monad (liftM2)
 import Control.Monad.Catch(throwM)
 import Data.Attoparsec.Text (parseOnly)
+import Data.List (partition)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, query)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), PostgresBindException(..))
@@ -46,6 +49,7 @@ import Database.PostgreSQL.Simple.Bind.Parser (parsePGFunction, pgArguments, pgR
 import Language.Haskell.TH.Syntax (Q, Dec, addDependentFile, runIO)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath.Posix ((</>))
+import System.Posix.Files (getFileStatus, isRegularFile, isDirectory)
 import Database.PostgreSQL.Simple.SqlQQ (sql)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -62,17 +66,35 @@ bindFunctionsFromFile opt fn = do
   runIO (T.readFile fn)
     >>= bindFunctionsFromText opt
 
--- | Bind functions found in all files in specified directory.
+-- | Bind functions found in all files in specified directory only.
 bindFunctionsFromDirectory :: PostgresBindOptions -> FilePath -> Q [Dec]
-bindFunctionsFromDirectory bindOptions fn = do
-  exists <- runIO (doesDirectoryExist fn)
-  if not exists
-     then return []
-     else runIO (listDirectory fn)
-          >>= fmap concat
-          . mapM (bindFunctionsFromFile bindOptions)
-          . filter (not . pboIgnoreFiles bindOptions)
-          . fmap (fn </>)
+bindFunctionsFromDirectory = bindFunctionsFromDirectory' False
+
+-- | Bind functions found in all files in specified directory and subdirectories.
+bindFunctionsFromDirectoryRecursive :: PostgresBindOptions -> FilePath -> Q [Dec]
+bindFunctionsFromDirectoryRecursive = bindFunctionsFromDirectory' True
+
+-- | Bind functions found in all files in specified directory, generic version.
+bindFunctionsFromDirectory' :: Bool -> PostgresBindOptions -> FilePath -> Q [Dec]
+bindFunctionsFromDirectory' recursive opt fn =
+  runIO (getFiles fn) >>= fmap concat . mapM (bindFunctionsFromFile opt) where
+
+    getFiles :: FilePath -> IO [FilePath]
+    getFiles d = doesDirectoryExist d >>= \case
+      False -> return []
+      True  -> do
+        (fs, ds) <- listDirectory d
+                   >>= mapM ((uncurry fmap) . ((,) &&& getFileStatus)) . (map (d </>))
+                   >>= return
+                     . (first (filter (not . pboIgnoreFiles opt)))
+                     . (map fst *** map fst)                    -- drop file statuses
+                     . (fst &&& (fst . snd))                    -- ([regular files], [directories])
+                     . (second (partition (isDirectory . snd))) -- ([regular files], ([directories], rest))
+                     . (partition (isRegularFile . snd))        -- ([regular files], rest)
+        if recursive
+          then return fs
+          else fmap (fs ++) . fmap concat . mapM getFiles $ ds
+
 
 -- | Bind functions with specified name from the database.
 bindFunctionsFromDB :: PostgresBindOptions -> Connection -> Maybe String -> String -> Q [Dec]

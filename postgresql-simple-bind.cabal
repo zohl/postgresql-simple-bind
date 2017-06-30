@@ -47,11 +47,12 @@ library
                , filepath
                , heredoc >= 0.2.0 && < 0.3
                , postgresql-simple >= 0.5.2 && < 0.6
+               , safe
                , template-haskell >= 2.11.0 && < 2.12
                , text >= 1.2.2 && < 1.3
                , time >= 1.6.0 && < 1.7
                , transformers
-               , safe
+               , unix
 
   hs-source-dirs: src
   exposed-modules:
