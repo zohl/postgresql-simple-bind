@@ -404,3 +404,25 @@ spec = do
         (IncoherentReturnTypes
           (PGTable [PGColumn {pgcName = "p1", pgcType = "bigint"}])
           (PGSingle ["bigint"]))
+
+
+  describe "pgDeclarations" $ do
+    let test t = testParser pgDeclarations t . Right
+    let f = PGFunction {
+            pgfSchema = Nothing
+          , pgfName   = "foo"
+          , pgfArguments = []
+          , pgfResult = PGSingle ["bigint"]
+          }
+
+    it "works with single function declaration" $ do
+      test
+        "create function foo() returns bigint as 'select 42::bigint';"
+        [f]
+
+    it "works with multiple function declaration" $ do
+      test
+        [str|create function foo() returns bigint as 'select 42::bigint';
+            |create function bar() returns bigint as 'select 42::bigint';
+            |]
+        [f, f {pgfName = "bar"}]

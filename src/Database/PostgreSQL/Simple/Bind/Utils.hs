@@ -38,14 +38,14 @@ module Database.PostgreSQL.Simple.Bind.Utils (
 import Control.Arrow ((***), (&&&), first, second)
 import Control.Monad (liftM2)
 import Control.Monad.Catch(throwM)
-import Data.Attoparsec.Text (parseOnly)
+import Data.Attoparsec.Text (parseOnly, endOfInput)
 import Data.List (partition)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, query)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Implementation (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
-import Database.PostgreSQL.Simple.Bind.Parser (parsePGFunction, pgArguments, pgResult)
+import Database.PostgreSQL.Simple.Bind.Parser (pgDeclarations, pgArguments, pgResult)
 import Language.Haskell.TH.Syntax (Q, Dec, addDependentFile, runIO)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath.Posix ((</>))
@@ -57,7 +57,11 @@ import qualified Data.Text.IO as T
 
 -- | Bind functions from specified text.
 bindFunctionsFromText :: PostgresBindOptions -> Text -> Q [Dec]
-bindFunctionsFromText opt s = parsePGFunction s >>= bindFunction opt
+bindFunctionsFromText opt s = either
+  (\err -> throwM . ParserFailed . concat $ ["In declaration `", T.unpack s, "`: ", err])
+  (return)
+  (parseOnly (pgDeclarations <* endOfInput) s)
+  >>= fmap concat . sequence . map (bindFunction opt)
 
 -- | Bind functions found in specified file.
 bindFunctionsFromFile :: PostgresBindOptions -> FilePath -> Q [Dec]

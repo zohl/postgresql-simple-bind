@@ -37,6 +37,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgArguments
   , pgArgumentMode
   , pgFunction
+  , pgDeclarations
   , ParserException(..)
   ) where
 
@@ -45,7 +46,7 @@ import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
 import Control.Arrow ((&&&), second)
 import Control.Monad (when, void, liftM2)
 import Control.Monad.Catch (MonadThrow(..), throwM)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (listToMaybe, catMaybes)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
@@ -366,6 +367,14 @@ pgFunction = do
   _ <- ss *> (asciiCI "with" *> ((ss *> pgFunctionObsoleteProperty <* ss) `sepBy` (char ',')) *> pure ()) <|> pure ()
 
   return PGFunction {..}
+
+
+-- | Parser for a generic sql declarations. Filters out everything but
+-- function declarations.
+pgDeclarations :: Parser [PGFunction]
+pgDeclarations = catMaybes <$> ((many (ss *> pgDeclaration)) <* ss) where
+  pgDeclaration = ((Just <$> pgFunction) <|> (pgNonFunction *> pure Nothing)) <* ss <* char ';'
+  pgNonFunction = satisfy (/= ';') -- TODO: check for string literals
 
 
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.
