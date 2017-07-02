@@ -32,6 +32,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgType
   , pgResult
   , pgString
+  , pgComment
   , pgColumn
   , pgArgument
   , pgArguments
@@ -50,6 +51,7 @@ import Data.Maybe (listToMaybe, catMaybes)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
+import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar')
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
@@ -87,6 +89,26 @@ ss = skipSpace
 asciiCIs :: [Text] -> Parser ()
 asciiCIs []     = return ()
 asciiCIs (w:ws) = asciiCI w *> ss *> asciiCIs ws
+
+
+-- | Parser for a comment
+pgComment :: Parser Text
+pgComment = pgLineComment <|> pgBlockComment where
+  pgLineComment = (liftA2 (<>) (string "--") (takeWhile (not . isEndOfLine))) <* (endOfLine <|> pure ())
+  pgBlockComment = liftA2 (<>) (string "/*") pgBlockCommentTail
+  pgBlockCommentTail = do
+    (s, c) <- liftA2 (,)
+      (takeWhile (\c -> c /= '*' && c /= '/'))
+      peekChar'
+    (<|>)
+      (if c == '*'
+          then ((s <>) <$> (string "*/"))
+          else liftA2 (<>)
+                 ((s <>) <$> pgBlockComment)
+                 pgBlockCommentTail)
+      (liftA2 (<>)
+         ((T.snoc s) <$> anyChar)
+         pgBlockCommentTail)
 
 
 -- | Parser for a string surrounded by "'" or "\"".
@@ -373,8 +395,10 @@ pgFunction = do
 -- function declarations.
 pgDeclarations :: Parser [PGFunction]
 pgDeclarations = catMaybes <$> ((many (ss *> pgDeclaration)) <* ss) where
-  pgDeclaration = ((Just <$> pgFunction) <|> (pgNonFunction *> pure Nothing)) <* ss <* char ';'
-  pgNonFunction = satisfy (/= ';') -- TODO: check for string literals
+  pgDeclaration = (Just <$> (pgFunction <* ss <* char ';'))
+              <|> (pgNonFunction *> pure Nothing)
+  pgNonFunction = pgComment
+              <|> takeWhile (/= ';') <* ss <* char ';' -- TODO: check for string literals
 
 
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.

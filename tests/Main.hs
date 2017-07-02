@@ -23,6 +23,20 @@ testParser parser text result =
 
 spec :: Spec
 spec = do
+
+  describe "pgComment" $ do
+    let test t = testParser pgComment t . Right
+
+    it "works with inline comments" $ do
+      test "-- comment without end of line" "-- comment without end of line"
+      test "-- comment with end of line\n"  "-- comment with end of line"
+
+    it "works with block comments" $ do
+      test "/* simple comment */" "/* simple comment */"
+      test
+        "/* outer comment /* inner comment */ outer comment */"
+        "/* outer comment /* inner comment */ outer comment */"
+
   describe "pgString" $ do
     let test t = testParser pgString t (Right t)
     it "works with single-quoted strings" $ do
@@ -423,6 +437,18 @@ spec = do
     it "works with multiple function declaration" $ do
       test
         [str|create function foo() returns bigint as 'select 42::bigint';
+            |create function bar() returns bigint as 'select 42::bigint';
+            |]
+        [f, f {pgfName = "bar"}]
+
+    it "works with comments" $ do
+      test
+        [str| -- foo
+            |create function foo() returns bigint as 'select 42::bigint';
+            |
+            | /* bar
+            |  *
+            |  */
             |create function bar() returns bigint as 'select 42::bigint';
             |]
         [f, f {pgfName = "bar"}]
