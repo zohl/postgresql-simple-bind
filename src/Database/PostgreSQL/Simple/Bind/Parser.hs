@@ -395,10 +395,25 @@ pgFunction = do
 -- function declarations.
 pgDeclarations :: Parser [PGFunction]
 pgDeclarations = catMaybes <$> ((many (ss *> pgDeclaration)) <* ss) where
+
+  pgDeclaration :: Parser (Maybe PGFunction)
   pgDeclaration = (Just <$> (pgFunction <* ss <* char ';'))
-              <|> (pgNonFunction *> pure Nothing)
-  pgNonFunction = pgComment
-              <|> takeWhile (/= ';') <* ss <* char ';' -- TODO: check for string literals
+              <|> (pgNonFunction)
+
+  pgNonFunction :: Parser (Maybe PGFunction)
+  pgNonFunction = pgComment                       *> pure Nothing
+              <|> pgOtherClause *> ss *> char ';' *> pure Nothing
+
+  pgOtherClause :: Parser ()
+  pgOtherClause = do
+    (s, c) <- liftA2 (,)
+      (takeWhile (not . inClass "'\"$;"))
+      peekChar'
+    if c == ';'
+      then pure ()
+      else if (inClass "'\"" c || T.null s || (not $ inClass "a-zA-Z0-9_" (T.last s)))
+           then pgString *> pgOtherClause
+           else anyChar  *> pgOtherClause
 
 
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.

@@ -441,7 +441,7 @@ spec = do
             |]
         [f, f {pgfName = "bar"}]
 
-    it "works with comments" $ do
+    it "ignores comments" $ do
       test
         [str| -- foo
             |create function foo() returns bigint as 'select 42::bigint';
@@ -452,3 +452,16 @@ spec = do
             |create function bar() returns bigint as 'select 42::bigint';
             |]
         [f, f {pgfName = "bar"}]
+
+    it "ignores other clauses" $ do
+      test
+        [str|create table t (f_id bigint, f_body varchar);
+            |insert into t (f_id, f_body) values (1, 'create function foo() bigint as $$ select 1; $$;');
+            |insert into t (f_id, f_body) values (2, 'create function bar() bigint as $$ select 2; $$;');
+            |commit;
+            |
+            |perform 'create function baz() returns void as $$ select 3; $$';
+            |perform '; create function qux() returns void as $$ select 3; $$; ';
+            |
+            |]
+        []
