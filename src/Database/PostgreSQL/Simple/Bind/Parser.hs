@@ -44,7 +44,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
 
 
 import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
-import Control.Arrow ((&&&), second)
+import Control.Arrow ((&&&), (***), first, second)
 import Control.Monad (when, void, liftM2)
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Data.Maybe (listToMaybe, catMaybes)
@@ -164,16 +164,21 @@ pgIdentifier :: Parser Text
 pgIdentifier = ((char '"') *> (pgQuotedString '"')) <|> pgNormalIdentifier where
 
 
+-- | Parser combinator to retrieve additionally a qualification.
+qualified :: Parser a -> Parser (Text, a)
+qualified = liftA2 (,) (pgIdentifier <* char '.')
+
+-- | Parser combinator to retrieve additionally a qualification (if exist).
+optionallyQualified :: Parser a -> Parser (Maybe Text, a)
+optionallyQualified p = ((first Just) <$> qualified p) <|> ((Nothing,) <$> p)
+
 -- | Parser for a type.
 pgType :: Parser (Text, Maybe Text)
-pgType = pgColumnType <|> pgExactType where
+pgType = snd <$> (optionallyQualified pgColumnType <|> optionallyQualified pgExactType) where
 
   pgColumnType :: Parser (Text, Maybe Text)
-  pgColumnType = fmap ((,Nothing) . mconcat) . sequence $ [
-      pgIdentifier
-    , T.singleton <$> char '.'
-    , pgIdentifier
-    , (asciiCI "%type")]
+  pgColumnType = ((,Nothing) . uncurry (<>) . ((<> ".") *** (<> "%type")))
+             <$> (qualified pgIdentifier <* asciiCI "%type")
 
   pgExactType :: Parser (Text, Maybe Text)
   pgExactType = do

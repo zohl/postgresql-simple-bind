@@ -223,6 +223,12 @@ spec = do
       test "t_custom_type"           ("t_custom_type", Nothing)
       test "t_custom_type (1,2,3,4)" ("t_custom_type", Just "1,2,3,4")
 
+    it "works schema-qualified types" $ do
+      test "public.t_custom_type"          ("t_custom_type",     Nothing)
+      test "public.t_custom_type(8)[3][3]" ("t_custom_type[][]", Just "8")
+      test "public.country.code%type"      ("country.code%type", Nothing)
+
+
   describe "pgFunction" $ do
     let test t = testParser pgFunction t . Right
 
@@ -276,13 +282,13 @@ spec = do
           , pgfResult = PGSingle ["bigint"]
           }
 
-    it "works with qualified function names" $ do
+    it "works with schema-qualified functions" $ do
       test
-        [str|create function test.foo()
+        [str|create function public.foo()
             |returns bigint as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema = Just "test"
+            pgfSchema = Just "public"
           , pgfName   = "foo"
           , pgfArguments = []
           , pgfResult = PGSingle ["bigint"]
