@@ -44,7 +44,7 @@ import Data.Text (Text)
 import Database.PostgreSQL.Simple (Connection, query)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Implementation (bindFunction)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGIdentifier(..))
 import Database.PostgreSQL.Simple.Bind.Parser (pgDeclarations, pgArguments, pgResult)
 import Language.Haskell.TH.Syntax (Q, Dec, addDependentFile, runIO)
 import System.Directory (doesDirectoryExist, listDirectory)
@@ -101,26 +101,27 @@ bindFunctionsFromDirectory' recursive opt fn =
 
 
 -- | Bind functions with specified name from the database.
-bindFunctionsFromDB :: PostgresBindOptions -> Connection -> Maybe String -> String -> Q [Dec]
-bindFunctionsFromDB opt conn pgfSchema pgfName = (runIO fetchFunction)
-                                             >>= fmap concat . mapM (bindFunction opt) where
-  fetchFunction = (query conn sql' (pgfSchema, pgfName))
-              >>= mapM (uncurry (liftM2 (,)) . (parse (pgArguments False) *** parse pgResult))
-              >>= mapM (\(pgfArguments, pgfResult) -> return PGFunction {..})
+bindFunctionsFromDB :: PostgresBindOptions -> Connection -> PGIdentifier -> Q [Dec]
+bindFunctionsFromDB opt conn pgfIdentifier@(PGIdentifier {..})
+  = (runIO fetchFunction) >>= fmap concat . mapM (bindFunction opt) where
 
-  sql' = [sql|
-      select pg_catalog.pg_get_function_arguments(p.oid)
-           , pg_catalog.pg_get_function_result(p.oid)
-      from pg_catalog.pg_proc p
-           left join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-      where n.nspname = coalesce(?, n.nspname)
-        and p.proname ~ ('^('|| ? ||')$')
-        and not p.proisagg
-        and not p.proiswindow
-        and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
-    |]
+    fetchFunction = (query conn sql' (pgiSchema, pgiName))
+                >>= mapM (uncurry (liftM2 (,)) . (parse (pgArguments False) *** parse pgResult))
+                >>= mapM (\(pgfArguments, pgfResult) -> return PGFunction {..})
 
-  parse p s = either
-    (\err -> throwM . ParserFailed . concat $ ["In declaration `", T.unpack s, "`: ", err])
-    (return)
-    (parseOnly p s)
+    sql' = [sql|
+        select pg_catalog.pg_get_function_arguments(p.oid)
+             , pg_catalog.pg_get_function_result(p.oid)
+        from pg_catalog.pg_proc p
+             left join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = coalesce(?, n.nspname)
+          and p.proname ~ ('^('|| ? ||')$')
+          and not p.proisagg
+          and not p.proiswindow
+          and p.prorettype != ('pg_catalog.trigger'::pg_catalog.regtype);
+      |]
+
+    parse p s = either
+      (\err -> throwM . ParserFailed . concat $ ["In declaration `", T.unpack s, "`: ", err])
+      (return)
+      (parseOnly p s)

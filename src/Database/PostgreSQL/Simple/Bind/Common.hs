@@ -36,7 +36,7 @@ module Database.PostgreSQL.Simple.Bind.Common (
 import Control.Monad.Catch (Exception)
 import Data.Default (Default, def)
 import Database.PostgreSQL.Simple (Only(..))
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGIdentifier(..))
 import Data.Typeable (Typeable)
 
 -- | The exception is thrown when something goes wrong with this package.
@@ -69,7 +69,7 @@ data ReturnType
 data PostgresBindOptions = PostgresBindOptions {
     pboFunctionName    :: PGFunction -> String
     -- ^ Function that generates name of a binding.
-  , pboIsNullable      :: String -> String -> Bool
+  , pboIsNullable      :: PGIdentifier -> String -> Bool
     -- ^ Which columns in returned tables can be null.
   , pboSetOfReturnType :: String -> ReturnType
     -- ^ How to process type in "setof" clause.
@@ -82,17 +82,20 @@ data PostgresBindOptions = PostgresBindOptions {
     -- ^ Whether to print executed queries and their arguments.
   , pboIgnoreFiles     :: FilePath -> Bool
     -- ^ Which files do not search for bindings.
+  , pboDefaultSchema   :: Maybe String
+    -- ^ Schema that is assumed for unqualified identifiers.
   }
 
 instance Default PostgresBindOptions where
   def = PostgresBindOptions {
-      pboFunctionName    = pgfName
+      pboFunctionName    = pgiName . pgfIdentifier
     , pboIsNullable      = const . const $ False
     , pboSetOfReturnType = const AsField
     , pboExplicitCasts   = True
     , pboOlderCallSyntax = True
     , pboDebugQueries    = False
     , pboIgnoreFiles     = const True
+    , pboDefaultSchema   = Nothing
     }
 
 -- | Remove 'Only' constructor.

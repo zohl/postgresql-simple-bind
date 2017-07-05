@@ -32,6 +32,7 @@ module Database.PostgreSQL.Simple.Bind.Implementation (
   , PostgresType
   ) where
 
+import Control.Applicative ((<|>))
 import Control.Arrow ((&&&), second)
 import Control.Exception (throw)
 import Control.Monad.Catch (MonadThrow, throwM)
@@ -39,7 +40,7 @@ import Debug.Trace (traceIO)
 import Data.List (intersperse)
 import Data.Monoid ((<>), mconcat)
 import Database.PostgreSQL.Simple (Connection, query, query_)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..), PGIdentifier(..))
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..), PostgresBindOptions(..), ReturnType(..), unwrapRow, unwrapColumn)
 import Database.PostgreSQL.Simple.FromField (FromField)
 import Database.PostgreSQL.Simple.ToField (ToField(..))
@@ -133,23 +134,23 @@ mkResultT' mkResultColumnT' mkReturnClauseT' ts = do
 --         ["y", "z"]
 --       , [PostgresType "bigint" ~ y, FromField y, PostgresType "varchar" ~ z, FromField z]
 --       , (y, z))
-mkResultT :: PostgresBindOptions -> String -> PGResult -> Q ([Name], [Type], Type)
+mkResultT :: PostgresBindOptions -> PGIdentifier -> PGResult -> Q ([Name], [Type], Type)
 
-mkResultT _opt _fname (PGSingle ts) = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
+mkResultT _opt _fid (PGSingle ts) = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
   mkResultColumnT' = mkResultColumnT ''FromField
   mkReturnClauseT' = mkReturnClauseT False . map VarT
 
-mkResultT  opt _fname (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
+mkResultT  opt _fid (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
   mkResultColumnT' = mkResultColumnT
     (case ts of
         [t] -> mkConstraintT . pboSetOfReturnType opt $ t
         _   -> ''FromField)
   mkReturnClauseT' = mkReturnClauseT True . map VarT
 
-mkResultT opt fname (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' cols where
+mkResultT opt fid (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' cols where
   mkResultColumnT' = mkResultColumnT ''FromField . pgcType
   mkReturnClauseT' = mkReturnClauseT True . zipWith wrapColumn cols
-  wrapColumn c t = if (pboIsNullable opt fname . pgcName $ c)
+  wrapColumn c t = if (pboIsNullable opt fid . pgcName $ c)
                    then (ConT ''Maybe) `AppT` (VarT t)
                    else VarT t
 
@@ -193,7 +194,7 @@ mkArgsT cs = do
 mkFunctionT :: PostgresBindOptions -> PGFunction -> Q Dec
 mkFunctionT opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
   (argNames, argContext, argClause) <- mkArgsT pgfArguments
-  (retNames, retContext, retClause) <- mkResultT opt pgfName pgfResult
+  (retNames, retContext, retClause) <- mkResultT opt pgfIdentifier pgfResult
 
   let vars = map PlainTV (argNames ++ retNames)
   let context = argContext ++ retContext
@@ -293,9 +294,15 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
 
   return $ FunD funcName [Clause funcArgs funcBody funcDecl]
 
+formatIdentifier :: PostgresBindOptions -> PGIdentifier -> String
+formatIdentifier PostgresBindOptions {..} PGIdentifier {..} = maybe
+  pgiName
+  (++ ("." ++ pgiName))
+  (pgiSchema <|> pboDefaultSchema)
+
 
 queryPrefix :: PostgresBindOptions -> PGFunction -> String
-queryPrefix PostgresBindOptions {..} PGFunction {..} = select ++ " " ++ function where
+queryPrefix opt@(PostgresBindOptions {..}) PGFunction {..} = select ++ " " ++ (formatIdentifier opt pgfIdentifier) where
   select = case pgfResult of
     PGTable _     -> mkSelect AsRow
     PGSetOf [t]   -> mkSelect . pboSetOfReturnType $ t
@@ -304,11 +311,6 @@ queryPrefix PostgresBindOptions {..} PGFunction {..} = select ++ " " ++ function
 
   mkSelect AsRow   = "select * from"
   mkSelect AsField = "select"
-
-  function = maybe
-    pgfName
-    (++ ("." ++ pgfName))
-    pgfSchema
 
 
 

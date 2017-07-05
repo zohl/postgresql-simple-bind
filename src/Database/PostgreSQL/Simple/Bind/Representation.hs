@@ -18,6 +18,7 @@ module Database.PostgreSQL.Simple.Bind.Representation (
   , PGArgumentMode(..)
   , PGColumn(..)
   , PGResult(..)
+  , PGIdentifier(..)
   , mergePGResults
   ) where
 
@@ -32,6 +33,12 @@ instance Default PGArgumentMode where
   def = In
 
 
+-- | Representation of a qualified identificator.
+data PGIdentifier = PGIdentifier {
+    pgiSchema :: Maybe String
+  , pgiName   :: String
+  } deriving (Show, Eq)
+
 -- | Representation of a function's argument.
 data PGArgument = PGArgument {
     pgaMode     :: PGArgumentMode
@@ -42,10 +49,9 @@ data PGArgument = PGArgument {
 
 -- | Representation of a PostrgeSQL function signature (schema, name, arguments, result).
 data PGFunction = PGFunction {
-    pgfSchema    :: Maybe String
-  , pgfName      :: String
-  , pgfArguments :: [PGArgument]
-  , pgfResult    :: PGResult
+    pgfIdentifier :: PGIdentifier
+  , pgfArguments  :: [PGArgument]
+  , pgfResult     :: PGResult
   } deriving (Show, Eq)
 
 -- | Representation of a resultant's column (name, type).
@@ -63,7 +69,7 @@ data PGResult
 
 
 mergeTypes :: [String] -> [String] -> Maybe [String]
-mergeTypes ts ts' = 
+mergeTypes ts ts' =
   if ts == ts' || ((length ts' > 1) && ts == ["record"])
   then Just ts'
   else Nothing

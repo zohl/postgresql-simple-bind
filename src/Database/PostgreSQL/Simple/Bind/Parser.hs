@@ -55,7 +55,7 @@ import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar')
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), mergePGResults)
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), mergePGResults)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Safe (tailSafe)
 import qualified Data.Text as T
@@ -163,7 +163,6 @@ pgNormalIdentifier = T.toLower <$> liftA2 T.cons
 pgIdentifier :: Parser Text
 pgIdentifier = ((char '"') *> (pgQuotedString '"')) <|> pgNormalIdentifier where
 
-
 -- | Parser combinator to retrieve additionally a qualification.
 qualified :: Parser a -> Parser (Text, a)
 qualified = liftA2 (,) (pgIdentifier <* char '.')
@@ -171,6 +170,11 @@ qualified = liftA2 (,) (pgIdentifier <* char '.')
 -- | Parser combinator to retrieve additionally a qualification (if exist).
 optionallyQualified :: Parser a -> Parser (Maybe Text, a)
 optionallyQualified p = ((first Just) <$> qualified p) <|> ((Nothing,) <$> p)
+
+-- | Parser for an (optionally) qualified identifier.
+pgQualifiedIdentifier :: Parser PGIdentifier
+pgQualifiedIdentifier = uncurry PGIdentifier . (fmap T.unpack *** T.unpack) <$> optionallyQualified pgIdentifier
+
 
 -- | Parser for a type.
 pgType :: Parser (Text, Maybe Text)
@@ -381,9 +385,7 @@ pgFunctionObsoleteProperty = (asciiCI "isStrict" <|> asciiCI "isCachable") *> pu
 pgFunction :: Parser PGFunction
 pgFunction = do
   _            <- asciiCIs ["create", "function"] <|> asciiCIs ["create", "or", "replace", "function"]
-  (pgfSchema, pgfName) <- ss *> (
-        ((,) <$> (fmap (Just . T.unpack) $ pgIdentifier) <*> (char '.' *> (T.unpack <$> pgIdentifier)))
-    <|> ((Nothing,) . T.unpack <$> pgIdentifier))
+  pgfIdentifier <- ss *> pgQualifiedIdentifier
 
   (pgfArguments, pgfResult) <- liftM2 (,)
     (ss *> char '(' *> pgArguments True  <* char ')')

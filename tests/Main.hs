@@ -6,7 +6,7 @@ import Data.Bifunctor (first)
 import Data.Default (def)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..))
 import Text.Heredoc (str)
 import Test.Hspec
 
@@ -238,8 +238,7 @@ spec = do
             |returns bigint as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema = Nothing
-          , pgfName   = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult = PGSingle ["bigint"]
           }
@@ -249,8 +248,7 @@ spec = do
             |returns bigint as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema = Nothing
-          , pgfName   = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult = PGSingle ["bigint"]
           }
@@ -260,8 +258,7 @@ spec = do
             |returns bigint as
             |$$ select 42::bigint $$|]
         PGFunction {
-            pgfSchema = Nothing
-          , pgfName   = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = [
                 PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}]
           , pgfResult = PGSingle ["bigint"]
@@ -274,8 +271,7 @@ spec = do
             |  select 42::bigint'
             |$body$|]
         PGFunction {
-            pgfSchema = Nothing
-          , pgfName   = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = [
                 PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}
               , PGArgument {pgaMode = def, pgaName = Just "p_baz", pgaType = "varchar", pgaOptional = False}]
@@ -288,8 +284,7 @@ spec = do
             |returns bigint as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema = Just "public"
-          , pgfName   = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Just "public", pgiName = "foo" }
           , pgfArguments = []
           , pgfResult = PGSingle ["bigint"]
           }
@@ -299,8 +294,7 @@ spec = do
         [str|create function foo(out p_result bigint) as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema    = Nothing
-          , pgfName      = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult    = PGSingle ["bigint"]
           }
@@ -310,8 +304,7 @@ spec = do
             |returns bigint as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema    = Nothing
-          , pgfName      = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult    = PGSingle ["bigint"]
           }
@@ -321,8 +314,7 @@ spec = do
         [str|create function foo(out p1 bigint, out p2 varchar) as
             |$$ select 42::bigint, 'test'::varchar $$|]
         PGFunction {
-            pgfSchema    = Nothing
-          , pgfName      = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult    = PGSingle ["bigint", "varchar"]
           }
@@ -332,8 +324,7 @@ spec = do
             |returns record as
             |$$ select 42::bigint, 'test'::varchar $$|]
         PGFunction {
-            pgfSchema    = Nothing
-          , pgfName      = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult    = PGSingle ["bigint", "varchar"]
           }
@@ -344,8 +335,7 @@ spec = do
             |returns setof bigint as
             |'select 42::bigint'|]
         PGFunction {
-            pgfSchema    = Nothing
-          , pgfName      = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult    = PGSetOf ["bigint"]
           }
@@ -355,16 +345,14 @@ spec = do
             |returns setof record as
             |$$ select 42::bigint, 'test'::varchar $$|]
         PGFunction {
-            pgfSchema    = Nothing
-          , pgfName      = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult    = PGSetOf ["bigint", "varchar"]
           }
 
     it "works with different properties" $ do
       let test' s = test s PGFunction {
-            pgfSchema    = Nothing
-          , pgfName      = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult    = PGSingle ["void"]
           }
@@ -429,8 +417,7 @@ spec = do
   describe "pgDeclarations" $ do
     let test t = testParser pgDeclarations t . Right
     let f = PGFunction {
-            pgfSchema = Nothing
-          , pgfName   = "foo"
+            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
           , pgfArguments = []
           , pgfResult = PGSingle ["bigint"]
           }
@@ -445,7 +432,7 @@ spec = do
         [str|create function foo() returns bigint as 'select 42::bigint';
             |create function bar() returns bigint as 'select 42::bigint';
             |]
-        [f, f {pgfName = "bar"}]
+        [f, f {pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "bar" }}]
 
     it "ignores comments" $ do
       test
@@ -457,7 +444,7 @@ spec = do
             |  */
             |create function bar() returns bigint as 'select 42::bigint';
             |]
-        [f, f {pgfName = "bar"}]
+        [f, f {pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "bar" }}]
 
     it "ignores other clauses" $ do
       test
