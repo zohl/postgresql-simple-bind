@@ -55,7 +55,7 @@ import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar')
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), mergePGResults)
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGType(..), mergePGResults)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Safe (tailSafe)
 import qualified Data.Text as T
@@ -177,8 +177,11 @@ pgQualifiedIdentifier = uncurry PGIdentifier . (fmap T.unpack *** T.unpack) <$> 
 
 
 -- | Parser for a type.
-pgType :: Parser (Text, Maybe Text)
-pgType = snd <$> (optionallyQualified pgColumnType <|> optionallyQualified pgExactType) where
+pgType :: Parser PGType
+pgType = restructure
+       . first (fmap T.unpack)
+       . second (T.unpack *** fmap T.unpack)
+       <$> (optionallyQualified pgColumnType <|> optionallyQualified pgExactType) where
 
   pgColumnType :: Parser (Text, Maybe Text)
   pgColumnType = ((,Nothing) . uncurry (<>) . ((<> ".") *** (<> "%type")))
@@ -242,11 +245,14 @@ pgType = snd <$> (optionallyQualified pgColumnType <|> optionallyQualified pgExa
       dimension :: Parser (Maybe Int)
       dimension = (char '[') *> ((Just <$> decimal) <|> pure Nothing) <* (char ']')
 
+  restructure :: (Maybe String, (String, Maybe String)) -> PGType
+  restructure (pgiSchema, (pgiName, pgtModifiers)) = let pgtIdentifier = PGIdentifier {..} in PGType {..}
+
 -- | Parser for column definition in RETURNS TABLE clause.
 pgColumn :: Parser PGColumn
 pgColumn = liftA2 PGColumn
   (T.unpack <$> pgIdentifier)
-  ((T.unpack . fst) <$> (ss *> pgType))
+  (ss *> pgType)
 
 -- | Parser for an argument mode.
 pgArgumentMode :: Parser PGArgumentMode
@@ -270,13 +276,11 @@ pgArgument :: Parser PGArgument
 pgArgument = do
   pgaMode <- ss *> pgArgumentMode
   (pgaName, pgaType, pgaOptional) <-
-        (,,) <$> (ss *> pgArgumentName) <*> (ss *> pgArgumentType) <*> (ss *> pgOptional)
-    <|> (,,) <$> (return Nothing)       <*> (ss *> pgArgumentType) <*> (ss *> pgOptional)
+        (,,) <$> (ss *> pgArgumentName) <*> (ss *> pgType) <*> (ss *> pgOptional)
+    <|> (,,) <$> (return Nothing)       <*> (ss *> pgType) <*> (ss *> pgOptional)
   return PGArgument {..} where
 
     pgArgumentName = fmap (Just . T.unpack) $ ss *> pgIdentifier
-
-    pgArgumentType = fmap (T.unpack . fst) $ ss *> pgType
 
     pgOptional = ss *> (
           ((asciiCI "default" <|> string "=") *> ((not . T.null) <$> pgExpression))
@@ -318,10 +322,10 @@ pgArguments doCheck = do
 
 -- | Parser for 'pg_get_function_result' output.
 pgResult :: Parser PGResult
-pgResult = (fmap T.toLower $ asciiCI "setof" <|> asciiCI "table" <|> (fst <$> pgType)) >>= \case
-  "setof" -> (PGSetOf . pure . T.unpack) <$> (ss *> (fst <$> pgType))
-  "table" -> PGTable <$> (ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')')
-  t       -> return . PGSingle . pure . T.unpack $ t
+pgResult = ss *> (pgResultSetOf <|> pgResultTable <|> pgResultSingle) where
+  pgResultSetOf = fmap (PGSetOf . pure) $ asciiCI "setof" *> ss *> pgType
+  pgResultTable = fmap PGTable $ asciiCI "table" *> ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')'
+  pgResultSingle = fmap (PGSingle . pure) $ pgType
 
 -- | Move 'Out' arguments to PGResult record.
 normalizeFunction :: [PGArgument] -> Maybe PGResult -> Parser ([PGArgument], PGResult)

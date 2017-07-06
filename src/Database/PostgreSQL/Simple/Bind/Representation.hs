@@ -19,11 +19,13 @@ module Database.PostgreSQL.Simple.Bind.Representation (
   , PGColumn(..)
   , PGResult(..)
   , PGIdentifier(..)
+  , PGType(..)
   , mergePGResults
   ) where
 
 
 import Data.Default (Default, def)
+import Data.String (IsString(..))
 import Language.Haskell.TH.Syntax (Lift)
 
 -- | Representation of a function argument's mode.
@@ -32,18 +34,30 @@ data PGArgumentMode = In | Out | InOut | Variadic deriving (Show, Eq, Lift)
 instance Default PGArgumentMode where
   def = In
 
-
 -- | Representation of a qualified identificator.
 data PGIdentifier = PGIdentifier {
     pgiSchema :: Maybe String
   , pgiName   :: String
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Lift)
+
+instance IsString PGIdentifier where
+  fromString s = PGIdentifier { pgiSchema = Nothing, pgiName = s }
+
+
+data PGType = PGType {
+    pgtIdentifier :: PGIdentifier
+  , pgtModifiers  :: Maybe String
+  } deriving (Show, Eq, Lift)
+
+instance IsString PGType where
+  fromString s = PGType { pgtIdentifier = fromString s, pgtModifiers = Nothing }
+
 
 -- | Representation of a function's argument.
 data PGArgument = PGArgument {
     pgaMode     :: PGArgumentMode
   , pgaName     :: Maybe String
-  , pgaType     :: String
+  , pgaType     :: PGType
   , pgaOptional :: Bool
   } deriving (Show, Eq, Lift)
 
@@ -57,22 +71,26 @@ data PGFunction = PGFunction {
 -- | Representation of a resultant's column (name, type).
 data PGColumn = PGColumn {
     pgcName :: String
-  , pgcType :: String
+  , pgcType :: PGType
   } deriving (Show, Eq)
 
 -- | Representation of a function's return value.
 data PGResult
-  = PGSingle [String]
-  | PGSetOf  [String]
+  = PGSingle [PGType]
+  | PGSetOf  [PGType]
   | PGTable  [PGColumn]
     deriving (Show, Eq)
 
 
-mergeTypes :: [String] -> [String] -> Maybe [String]
+mergeTypes :: [PGType] -> [PGType] -> Maybe [PGType]
 mergeTypes ts ts' =
-  if ts == ts' || ((length ts' > 1) && ts == ["record"])
+  if ts == ts' || ((length ts' > 1) && ts == [recordType])
   then Just ts'
-  else Nothing
+  else Nothing where
+    recordType = PGType {
+        pgtIdentifier = PGIdentifier {pgiSchema = Nothing, pgiName = "record"}
+      , pgtModifiers = Nothing
+      }
 
 -- | Merge 'PGResult' derived from RETURNING clause (first) and
 --   derived from arguments (second).

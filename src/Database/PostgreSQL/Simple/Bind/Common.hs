@@ -36,7 +36,7 @@ module Database.PostgreSQL.Simple.Bind.Common (
 import Control.Monad.Catch (Exception)
 import Data.Default (Default, def)
 import Database.PostgreSQL.Simple (Only(..))
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGIdentifier(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGIdentifier(..), PGType(..))
 import Data.Typeable (Typeable)
 
 -- | The exception is thrown when something goes wrong with this package.
@@ -71,7 +71,7 @@ data PostgresBindOptions = PostgresBindOptions {
     -- ^ Function that generates name of a binding.
   , pboIsNullable      :: PGIdentifier -> String -> Bool
     -- ^ Which columns in returned tables can be null.
-  , pboSetOfReturnType :: String -> ReturnType
+  , pboSetOfReturnType :: PGType -> ReturnType
     -- ^ How to process type in "setof" clause.
   , pboExplicitCasts   :: Bool
     -- ^ Whether to add explicit type casts to arguments.

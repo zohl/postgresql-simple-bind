@@ -40,7 +40,7 @@ import Debug.Trace (traceIO)
 import Data.List (intersperse)
 import Data.Monoid ((<>), mconcat)
 import Database.PostgreSQL.Simple (Connection, query, query_)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..), PGIdentifier(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..), PGIdentifier(..), PGType(..))
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..), PostgresBindOptions(..), ReturnType(..), unwrapRow, unwrapColumn)
 import Database.PostgreSQL.Simple.FromField (FromField)
 import Database.PostgreSQL.Simple.ToField (ToField(..))
@@ -99,9 +99,9 @@ postgresT :: String -> Type
 postgresT t = AppT (ConT ''PostgresType) (LitT (StrTyLit t))
 
 -- | Example: ''FromField "varchar" a -> [PostgresType "varchar" ~ a, FromField a]
-mkContextT :: Name -> String -> Name -> [Type]
-mkContextT constraint typelit name = [
-    EqualityT `AppT` (postgresT typelit) `AppT` (VarT name)
+mkContextT :: PostgresBindOptions -> Name -> PGType -> Name -> [Type]
+mkContextT opt constraint t name = [
+    EqualityT `AppT` (postgresT (formatType' opt t)) `AppT` (VarT name)
   , (ConT constraint) `AppT` VarT name
   ]
 
@@ -109,15 +109,19 @@ mkConstraintT :: ReturnType -> Name
 mkConstraintT AsRow   = ''FromRow
 mkConstraintT AsField = ''FromField
 
-mkResultColumnT :: Name -> String -> Q (Name, [Type])
-mkResultColumnT c t = (id &&& (mkContextT c t)) <$> newName "y"
+mkResultColumnT :: PostgresBindOptions -> Name -> PGType -> Q (Name, [Type])
+mkResultColumnT opt c t = (id &&& (mkContextT opt c t)) <$> newName "y"
 
 mkReturnClauseT :: Bool -> [Type] -> Type
 mkReturnClauseT isMultiple = (if isMultiple then (AppT ListT) else id) . \case
   [t] -> t
   ts  -> foldl AppT (TupleT (length ts)) (ts)
 
-mkResultT' :: (t -> Q (Name, [Type])) -> ([Name] -> Type) -> [t] -> Q ([Name], [Type], Type)
+mkResultT'
+  :: (t -> Q (Name, [Type]))  -- ^ Generator of a new variable with necessary constraints.
+  -> ([Name] -> Type)         -- ^ Generator of a return statement.
+  -> [t]                      -- ^ Variables metadata (names+types or just types).
+  -> Q ([Name], [Type], Type)
 mkResultT' mkResultColumnT' mkReturnClauseT' ts = do
   (ns, cs) <- fmap (second concat . unzip) $ (mapM mkResultColumnT' ts)
   let clause = mkReturnClauseT' ns
@@ -136,19 +140,19 @@ mkResultT' mkResultColumnT' mkReturnClauseT' ts = do
 --       , (y, z))
 mkResultT :: PostgresBindOptions -> PGIdentifier -> PGResult -> Q ([Name], [Type], Type)
 
-mkResultT _opt _fid (PGSingle ts) = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
-  mkResultColumnT' = mkResultColumnT ''FromField
+mkResultT opt _fid (PGSingle ts) = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
+  mkResultColumnT' = mkResultColumnT opt ''FromField
   mkReturnClauseT' = mkReturnClauseT False . map VarT
 
-mkResultT  opt _fid (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
-  mkResultColumnT' = mkResultColumnT
+mkResultT opt _fid (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
+  mkResultColumnT' = mkResultColumnT opt
     (case ts of
         [t] -> mkConstraintT . pboSetOfReturnType opt $ t
         _   -> ''FromField)
   mkReturnClauseT' = mkReturnClauseT True . map VarT
 
 mkResultT opt fid (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' cols where
-  mkResultColumnT' = mkResultColumnT ''FromField . pgcType
+  mkResultColumnT' = mkResultColumnT opt ''FromField . pgcType
   mkReturnClauseT' = mkReturnClauseT True . zipWith wrapColumn cols
   wrapColumn c t = if (pboIsNullable opt fid . pgcName $ c)
                    then (ConT ''Maybe) `AppT` (VarT t)
@@ -163,10 +167,10 @@ mkResultT opt fid (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' 
 --   , [PostgresType "varchar" ~ x1, ToField x1, PostgresType "bigint" ~ x2, ToField x2]
 --   , [x1, Maybe x2]
 --   )
-mkArgsT :: [PGArgument] -> Q ([Name], [Type], [Type])
-mkArgsT cs = do
+mkArgsT :: PostgresBindOptions -> [PGArgument] -> Q ([Name], [Type], [Type])
+mkArgsT opt cs = do
   names <- sequence $ replicate (length cs) (newName "x")
-  let context = concat $ zipWith (\PGArgument {..} n -> mkContextT ''ToField pgaType n) cs names
+  let context = concat $ zipWith (\PGArgument {..} n -> mkContextT opt ''ToField pgaType n) cs names
 
   let defWrap d = case d of
         True  -> AppT (ConT ''Maybe)
@@ -193,7 +197,7 @@ mkArgsT cs = do
 --  }
 mkFunctionT :: PostgresBindOptions -> PGFunction -> Q Dec
 mkFunctionT opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
-  (argNames, argContext, argClause) <- mkArgsT pgfArguments
+  (argNames, argContext, argClause) <- mkArgsT opt pgfArguments
   (retNames, retContext, retClause) <- mkResultT opt pgfIdentifier pgfResult
 
   let vars = map PlainTV (argNames ++ retNames)
@@ -221,10 +225,10 @@ unwrapE _   (PGTable _)   q = unwrapE' AsRow q
 
 
 wrapArg :: PostgresBindOptions -> PGArgument -> Name -> Exp
-wrapArg PostgresBindOptions {..} PGArgument {..} argName = foldl1 AppE $ [
+wrapArg opt@(PostgresBindOptions {..}) PGArgument {..} argName = foldl1 AppE $ [
     ConE $ if pgaOptional then 'OptionalArg else 'MandatoryArg
   , LitE $ StringL $ maybe "(N/A)" id pgaName
-  , LitE $ StringL pgaType
+  , LitE $ StringL (formatType' opt pgaType)
   , if pboDebugQueries
       then foldr1 AppE [ConE 'Just, VarE 'show, VarE argName]
       else ConE 'Nothing
@@ -272,11 +276,13 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
 
   explicitCasts   <- lift pboExplicitCasts
   olderCallSyntax <- lift pboOlderCallSyntax
+  defaultSchema   <- lift pboDefaultSchema
   let queryBindings = BindS
         (TupP [VarP sqlQueryName, VarP refinedArgsName])
         ((VarE 'prepareQuery)
           `AppE` explicitCasts
           `AppE` olderCallSyntax
+          `AppE` defaultSchema
           `AppE` (LitE . StringL $ queryPrefix opt f)
           `AppE` specs
           `AppE` (VarE argsName))
@@ -294,23 +300,20 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
 
   return $ FunD funcName [Clause funcArgs funcBody funcDecl]
 
-formatIdentifier :: PostgresBindOptions -> PGIdentifier -> String
-formatIdentifier PostgresBindOptions {..} PGIdentifier {..} = maybe
-  pgiName
-  (++ ("." ++ pgiName))
-  (pgiSchema <|> pboDefaultSchema)
 
 
 queryPrefix :: PostgresBindOptions -> PGFunction -> String
-queryPrefix opt@(PostgresBindOptions {..}) PGFunction {..} = select ++ " " ++ (formatIdentifier opt pgfIdentifier) where
-  select = case pgfResult of
-    PGTable _     -> mkSelect AsRow
-    PGSetOf [t]   -> mkSelect . pboSetOfReturnType $ t
-    PGSetOf _     -> mkSelect AsRow
-    _             -> mkSelect AsField
+queryPrefix opt@(PostgresBindOptions {..}) PGFunction {..} =
+  select ++ " " ++ (formatIdentifier' opt pgfIdentifier) where
 
-  mkSelect AsRow   = "select * from"
-  mkSelect AsField = "select"
+    select = case pgfResult of
+      PGTable _     -> mkSelect AsRow
+      PGSetOf [t]   -> mkSelect . pboSetOfReturnType $ t
+      PGSetOf _     -> mkSelect AsRow
+      _             -> mkSelect AsField
+
+    mkSelect AsRow   = "select * from"
+    mkSelect AsField = "select"
 
 
 
@@ -342,9 +345,28 @@ queryPrefix opt@(PostgresBindOptions {..}) PGFunction {..} = select ++ " " ++ (f
 --   isPresented _                  = True
 
 
-formatArgument :: Bool -> PGArgument -> Builder
-formatArgument True  a = byteString "(?)::" <> (byteString . BSC8.pack . pgaType $ a)
-formatArgument False _ = char8 '?'
+formatIdentifier' :: PostgresBindOptions -> PGIdentifier -> String
+formatIdentifier' PostgresBindOptions {..} PGIdentifier {..} = maybe
+  pgiName
+  (++ ("." ++ pgiName))
+  (pgiSchema <|> pboDefaultSchema)
+
+formatType' :: PostgresBindOptions -> PGType -> String
+formatType' opt PGType {..} = formatIdentifier' opt pgtIdentifier
+
+
+formatIdentifier :: Maybe String -> PGIdentifier -> Builder
+formatIdentifier defaultSchema PGIdentifier {..} = byteString . BSC8.pack $ maybe
+  pgiName
+  (++ ("." ++ pgiName))
+  (pgiSchema <|> defaultSchema)
+
+formatType :: Maybe String -> PGType -> Builder
+formatType defaultSchema PGType {..} = formatIdentifier defaultSchema $ pgtIdentifier
+
+formatArgument :: Bool -> Maybe String -> PGArgument -> Builder
+formatArgument True  ds PGArgument {..} = byteString "(?)::" <> (formatType ds pgaType)
+formatArgument False _  _               = char8 '?'
 
 formatAssingment :: Bool -> String -> Builder
 formatAssingment ocs name = (byteString . BSC8.pack $ name) <> byteString (if ocs then ":=" else "=>")
@@ -352,33 +374,35 @@ formatAssingment ocs name = (byteString . BSC8.pack $ name) <> byteString (if oc
 runFormatter
   :: Bool                     -- ^ Explicit casts.
   -> Bool                     -- ^ Older call syntax.
+  -> Maybe String             -- ^ Default schema.
   -> Bool                     -- ^ Was optional argument omitted?
   -> [(PGArgument, Argument)] -- ^ Arguments with metadata.
   -> Maybe [(Builder, Argument)]
-runFormatter _ _ _ [] = return []
-runFormatter ec ocs o ((pga, arg):rest) = case arg of
-  MandatoryArg {..} -> ((formatArgument ec pga, arg):) <$> (runFormatter ec ocs o rest)
+runFormatter _ _ _ _ [] = return []
+runFormatter ec ocs ds o ((pga, arg):rest) = case arg of
+  MandatoryArg {..} -> ((formatArgument ec ds pga, arg):) <$> (runFormatter ec ocs ds o rest)
   OptionalArg  {..} -> case morgValue of
-    Nothing  -> runFormatter ec ocs True rest
+    Nothing  -> runFormatter ec ocs ds True rest
     (Just _) -> case (pgaName pga) of
       Nothing -> if o
         then Nothing
-        else ((char8 '?', arg):) <$> (runFormatter ec ocs o rest)
-      (Just name) -> ((formatAssingment ocs name <> (formatArgument ec pga), arg):)
-                 <$> (runFormatter ec ocs o rest)
+        else ((char8 '?', arg):) <$> (runFormatter ec ocs ds o rest)
+      (Just name) -> ((formatAssingment ocs name <> (formatArgument ec ds pga), arg):)
+                 <$> (runFormatter ec ocs ds o rest)
 
 prepareQuery :: (MonadThrow m)
   => Bool          -- ^ Explicit casts.
   -> Bool          -- ^ Older call syntax.
+  -> Maybe String  -- ^ Default schema.
   -> Builder       -- ^ Query prefix.
   -> [PGArgument]  -- ^ Arguments to format.
   -> [Argument]
   -> m (Query, [Argument])
-prepareQuery ec ocs prefix specs args = do
+prepareQuery ec ocs ds prefix specs args = do
   (argsString, refinedArgs) <- maybe
     (throwM (IncorrectInvocation . show $ (specs, args)))
     (return)
-    (unzip <$> runFormatter ec ocs False (zip specs args))
+    (unzip <$> runFormatter ec ocs ds False (zip specs args))
   let sqlQuery = mconcat [
           prefix, char8 '(', mconcat . intersperse (char8 ',') $ argsString, char8 ')']
   return (Query . BS.toStrict . toLazyByteString $ sqlQuery, refinedArgs)
