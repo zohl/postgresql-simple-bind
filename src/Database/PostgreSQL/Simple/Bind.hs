@@ -31,10 +31,12 @@ module Database.PostgreSQL.Simple.Bind (
   , PGArgument(..)
   , PGColumn(..)
   , PGResult(..)
+  , PGIdentifier(..)
+  , PGType(..)
   ) where
 
 
 import Database.PostgreSQL.Simple.Bind.Implementation (PostgresType, bindFunction)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGColumn(..), PGResult(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGType(..))
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..), PostgresBindOptions(..), ReturnType(..))
 import Database.PostgreSQL.Simple.Bind.Utils (bindFunctionsFromText, bindFunctionsFromFile, bindFunctionsFromDirectory, bindFunctionsFromDB)
