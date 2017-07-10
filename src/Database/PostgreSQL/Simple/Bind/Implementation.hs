@@ -35,14 +35,14 @@ module Database.PostgreSQL.Simple.Bind.Implementation (
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Arrow ((&&&), second)
+import Control.Arrow (first, second)
 import Control.Exception (throw)
 import Control.Monad (liftM2)
 import Control.Monad.Catch (MonadThrow, throwM)
 import Control.Monad.Trans.Reader (ReaderT, runReaderT, ask)
 import Control.Monad.Trans.Class (lift)
 import Debug.Trace (traceIO)
-import Data.List (intersperse)
+import Data.List (intersperse, intercalate)
 import Data.Monoid ((<>), mconcat)
 import Database.PostgreSQL.Simple (Connection, query, query_)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGResult(..), PGColumn(..), PGIdentifier(..), PGType(..))
@@ -66,7 +66,8 @@ type family PostgresType (a :: Symbol)
 
 -- | Create binding from given representation of a PostgreSQL function.
 bindFunction :: PostgresBindOptions -> PGFunction -> Q [Dec]
-bindFunction opt f = sequence $ (($ f) . ($ opt)) <$> [mkFunctionT, mkFunctionE]
+bindFunction opt f = sequence $ ($ opt) . runReaderT . ($ f) <$> [mkFunctionT, mkFunctionE]
+
 
 
 data Argument
@@ -100,14 +101,20 @@ instance Show Argument where
     ]
 
 
+type TemplateBuilder a = ReaderT PostgresBindOptions Q a
+
 -- | Example: "varchar" -> PostgresType "varchar"
-postgresT :: String -> Type
-postgresT t = AppT (ConT ''PostgresType) (LitT (StrTyLit t))
+postgresT :: PGType -> TemplateBuilder Type
+postgresT t = AppT (ConT ''PostgresType) . LitT . StrTyLit <$> (formatType' t)
 
 -- | Example: ''FromField "varchar" a -> [PostgresType "varchar" ~ a, FromField a]
-mkContextT :: PostgresBindOptions -> Name -> PGType -> Name -> [Type]
-mkContextT opt constraint t name = [
-    EqualityT `AppT` (postgresT (formatType' opt t)) `AppT` (VarT name)
+mkContextT
+  :: Name   -- ^ 'FromField' or 'ToField' constraint name.
+  -> PGType -- ^ Variable type.
+  -> Name   -- ^ Variable name.
+  -> TemplateBuilder [Type]
+mkContextT constraint t name = postgresT t >>= \r -> return [
+    EqualityT `AppT` r `AppT` (VarT name)
   , (ConT constraint) `AppT` VarT name
   ]
 
@@ -115,22 +122,22 @@ mkConstraintT :: ReturnType -> Name
 mkConstraintT AsRow   = ''FromRow
 mkConstraintT AsField = ''FromField
 
-mkResultColumnT :: PostgresBindOptions -> Name -> PGType -> Q (Name, [Type])
-mkResultColumnT opt c t = (id &&& (mkContextT opt c t)) <$> newName "y"
+mkResultColumnT :: Name -> PGType -> TemplateBuilder (Name, [Type])
+mkResultColumnT c t = lift (newName "y") >>= \n -> (n,) <$> mkContextT c t n
 
-mkReturnClauseT :: Bool -> [Type] -> Type
-mkReturnClauseT isMultiple = (if isMultiple then (AppT ListT) else id) . \case
+mkReturnClauseT :: Bool -> [Type] -> TemplateBuilder Type
+mkReturnClauseT isMultiple = return . (if isMultiple then (AppT ListT) else id) . \case
   [t] -> t
   ts  -> foldl AppT (TupleT (length ts)) (ts)
 
 mkResultT'
-  :: (t -> Q (Name, [Type]))  -- ^ Generator of a new variable with necessary constraints.
-  -> ([Name] -> Type)         -- ^ Generator of a return statement.
-  -> [t]                      -- ^ Variables metadata (names+types or just types).
-  -> Q ([Name], [Type], Type)
+  :: (t -> TemplateBuilder (Name, [Type]))  -- ^ Generator of a new variable with necessary constraints.
+  -> ([Name] -> TemplateBuilder Type)       -- ^ Generator of a return statement.
+  -> [t]                                    -- ^ Variables metadata (names+types or just types).
+  -> TemplateBuilder ([Name], [Type], Type)
 mkResultT' mkResultColumnT' mkReturnClauseT' ts = do
   (ns, cs) <- fmap (second concat . unzip) $ (mapM mkResultColumnT' ts)
-  let clause = mkReturnClauseT' ns
+  clause   <- mkReturnClauseT' ns
   return (ns, cs, clause)
 
 -- | Examples:
@@ -144,25 +151,25 @@ mkResultT' mkResultColumnT' mkReturnClauseT' ts = do
 --         ["y", "z"]
 --       , [PostgresType "bigint" ~ y, FromField y, PostgresType "varchar" ~ z, FromField z]
 --       , (y, z))
-mkResultT :: PostgresBindOptions -> PGIdentifier -> PGResult -> Q ([Name], [Type], Type)
+mkResultT :: PGIdentifier -> PGResult -> TemplateBuilder ([Name], [Type], Type)
 
-mkResultT opt _fid (PGSingle ts) = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
-  mkResultColumnT' = mkResultColumnT opt ''FromField
+mkResultT _fid (PGSingle ts) = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
+  mkResultColumnT' = mkResultColumnT ''FromField
   mkReturnClauseT' = mkReturnClauseT False . map VarT
 
-mkResultT opt _fid (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
-  mkResultColumnT' = mkResultColumnT opt
-    (case ts of
-        [t] -> mkConstraintT . pboSetOfReturnType opt $ t
-        _   -> ''FromField)
+mkResultT _fid (PGSetOf ts)  = mkResultT' mkResultColumnT' mkReturnClauseT' ts where
+  mkResultColumnT' = (>>= uncurry (flip mkResultColumnT)) . (flip fmap) mkConstraintT' . (,)
+  mkConstraintT'   = case ts of
+    [t] -> mkConstraintT <$> (pboSetOfReturnType <$> ask <*> return t)
+    _   -> return ''FromField
   mkReturnClauseT' = mkReturnClauseT True . map VarT
 
-mkResultT opt fid (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' cols where
-  mkResultColumnT' = mkResultColumnT opt ''FromField . pgcType
-  mkReturnClauseT' = mkReturnClauseT True . zipWith wrapColumn cols
-  wrapColumn c t = if (pboIsNullable opt fid . pgcName $ c)
-                   then (ConT ''Maybe) `AppT` (VarT t)
-                   else VarT t
+mkResultT fid (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' cols where
+  mkResultColumnT' = mkResultColumnT ''FromField . pgcType
+  mkReturnClauseT' = (>>= mkReturnClauseT True) . sequence . zipWith wrapColumn cols
+  wrapColumn c t = (($ pgcName c) . ($ fid). pboIsNullable <$> ask) >>= return . \case
+    True  -> (ConT ''Maybe) `AppT` (VarT t)
+    False -> VarT t
 
 
 -- | Example: [
@@ -173,10 +180,10 @@ mkResultT opt fid (PGTable cols) = mkResultT' mkResultColumnT' mkReturnClauseT' 
 --   , [PostgresType "varchar" ~ x1, ToField x1, PostgresType "bigint" ~ x2, ToField x2]
 --   , [x1, Maybe x2]
 --   )
-mkArgsT :: PostgresBindOptions -> [PGArgument] -> Q ([Name], [Type], [Type])
-mkArgsT opt cs = do
-  names <- sequence $ replicate (length cs) (newName "x")
-  let context = concat $ zipWith (\PGArgument {..} n -> mkContextT opt ''ToField pgaType n) cs names
+mkArgsT :: [PGArgument] -> TemplateBuilder ([Name], [Type], [Type])
+mkArgsT cs = do
+  names   <- lift . sequence $ replicate (length cs) (newName "x")
+  context <- fmap concat . sequence $ zipWith (curry $ uncurry (mkContextT ''ToField) . first pgaType) cs names
 
   let defWrap d = case d of
         True  -> AppT (ConT ''Maybe)
@@ -201,10 +208,11 @@ mkArgsT opt cs = do
 --        , PostgresType "varchar" ~ x2, FromField x3
 --        ) => Connection -> x1 -> Maybe x2 -> x3
 --  }
-mkFunctionT :: PostgresBindOptions -> PGFunction -> Q Dec
-mkFunctionT opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
-  (argNames, argContext, argClause) <- mkArgsT opt pgfArguments
-  (retNames, retContext, retClause) <- mkResultT opt pgfIdentifier pgfResult
+mkFunctionT :: PGFunction -> TemplateBuilder Dec
+mkFunctionT f@(PGFunction {..}) = do
+  PostgresBindOptions {..}  <- ask
+  (argNames, argContext, argClause) <- mkArgsT pgfArguments
+  (retNames, retContext, retClause) <- mkResultT pgfIdentifier pgfResult
 
   let vars = map PlainTV (argNames ++ retNames)
   let context = argContext ++ retContext
@@ -223,22 +231,25 @@ unwrapE' AsField q = (VarE 'fmap) `AppE` (VarE 'unwrapColumn) `AppE` q
 --     (PGSingle _) q -> { unwrapRow  q }
 --     (PGSetOf  _) q -> { unwrapColumn q }
 --     (PGTable  _) q -> { q }
-unwrapE :: PostgresBindOptions -> PGResult -> Exp -> Exp
-unwrapE _   (PGSingle _)  q = (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
-unwrapE opt (PGSetOf [t]) q = unwrapE' (pboSetOfReturnType opt t) q
-unwrapE _   (PGSetOf   _) q = unwrapE' AsRow q
-unwrapE _   (PGTable _)   q = unwrapE' AsRow q
+unwrapE :: PGResult -> Exp -> TemplateBuilder Exp
+unwrapE (PGSingle _)  q = return $ (VarE 'fmap) `AppE` (VarE 'unwrapRow) `AppE` q
+unwrapE (PGSetOf [t]) q = flip unwrapE' q . ($ t) . pboSetOfReturnType <$> ask
+unwrapE (PGSetOf   _) q = return $ unwrapE' AsRow q
+unwrapE (PGTable _)   q = return $ unwrapE' AsRow q
 
 
-wrapArg :: PostgresBindOptions -> PGArgument -> Name -> Exp
-wrapArg opt@(PostgresBindOptions {..}) PGArgument {..} argName = foldl1 AppE $ [
-    ConE $ if pgaOptional then 'OptionalArg else 'MandatoryArg
-  , LitE $ StringL $ maybe "(N/A)" id pgaName
-  , LitE $ StringL (formatType' opt pgaType)
-  , if pboDebugQueries
-      then foldr1 AppE [ConE 'Just, VarE 'show, VarE argName]
-      else ConE 'Nothing
-  , VarE argName]
+wrapArg :: PGArgument -> Name -> TemplateBuilder Exp
+wrapArg PGArgument {..} argName = do
+  t     <- formatType' pgaType
+  value <- (pboDebugQueries <$> ask) >>= return . \case
+    True  -> foldr1 AppE [ConE 'Just, VarE 'show, VarE argName]
+    False -> ConE 'Nothing
+  return $ foldl1 AppE $ [
+      ConE $ if pgaOptional then 'OptionalArg else 'MandatoryArg
+    , LitE $ StringL $ maybe "(N/A)" id pgaName
+    , LitE $ StringL t
+    , value
+    , VarE argName]
 
 
 traceE :: Exp -> Exp
@@ -258,21 +269,20 @@ traceE e = (VarE 'traceIO) `AppE` ((VarE 'show) `AppE` e)
 --       (Query $ BS.pack $ concat ["select public.foo (", (formatArguments args), ")"])
 --       (filterArguments [MandatoryArg "x1" x1, OptionalArg "x2" x2])
 --   }
-mkFunctionE :: PostgresBindOptions -> PGFunction -> Q Dec
-mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
-
+mkFunctionE :: PGFunction -> TemplateBuilder Dec
+mkFunctionE f@(PGFunction {..}) = do
+  PostgresBindOptions {..} <- ask
   let funcName = mkName (pboFunctionName f)
 
-  varNames <- sequence $ replicate (length pgfArguments) (newName "x")
-  connName <- newName "conn"
+  varNames <- lift $ sequence $ replicate (length pgfArguments) (newName "x")
+  connName <- lift $ newName "conn"
   let funcArgs = (VarP connName):(map VarP varNames)
 
-  [argsName, sqlQueryName, refinedArgsName] <- mapM newName ["args", "sqlQuery", "refinedArgs"]
-  specs  <- TH.lift pgfArguments
+  [argsName, sqlQueryName, refinedArgsName] <- lift $ mapM newName ["args", "sqlQuery", "refinedArgs"]
+  specs  <- lift $ TH.lift pgfArguments
 
-  let funcDecl = [
-          ValD (VarP argsName)
-          (NormalB . ListE $ zipWith (wrapArg opt) pgfArguments varNames) []]
+  funcDecl <- (\body -> [ValD (VarP argsName) (NormalB . ListE $ body) []])
+    <$> sequence (zipWith wrapArg pgfArguments varNames)
 
   let traceQuery = NoBindS
         <$> if pboDebugQueries
@@ -280,28 +290,28 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
                  (if null varNames then [] else [traceE $ VarE argsName])
             else []
 
-  formatterOptions <- TH.lift FormatterOptions {
+  formatterOptions <- lift $ TH.lift FormatterOptions {
       foExplicitCasts   = pboExplicitCasts
     , foOlderCallSyntax = pboOlderCallSyntax
     , foDefaultSchema   = pboDefaultSchema
     }
 
-  let queryBindings = BindS
-        (TupP [VarP sqlQueryName, VarP refinedArgsName])
-        ((VarE 'prepareQuery)
-          `AppE` formatterOptions
-          `AppE` (LitE . StringL $ queryPrefix opt f)
-          `AppE` specs
-          `AppE` (VarE argsName))
+  queryBindings <- (\prefix -> BindS
+    (TupP [VarP sqlQueryName, VarP refinedArgsName])
+    ((VarE 'prepareQuery)
+      `AppE` formatterOptions
+      `AppE` (LitE . StringL $ prefix)
+      `AppE` specs
+      `AppE` (VarE argsName))) <$> (queryPrefix f)
 
-  let execQuery = NoBindS $ unwrapE opt pgfResult $ CondE ((VarE 'null) `AppE` (VarE refinedArgsName))
+  execQuery <- NoBindS <$> unwrapE pgfResult (CondE ((VarE 'null) `AppE` (VarE refinedArgsName))
         ((VarE 'query_)
           `AppE` (VarE connName)
           `AppE` (VarE sqlQueryName))
         ((VarE 'query)
           `AppE` (VarE connName)
           `AppE` (VarE sqlQueryName)
-          `AppE` (VarE refinedArgsName))
+          `AppE` (VarE refinedArgsName)))
 
   let funcBody = NormalB . DoE $ queryBindings:(concat [traceQuery, [execQuery]])
 
@@ -309,18 +319,16 @@ mkFunctionE opt@(PostgresBindOptions {..}) f@(PGFunction {..}) = do
 
 
 
-queryPrefix :: PostgresBindOptions -> PGFunction -> String
-queryPrefix opt@(PostgresBindOptions {..}) PGFunction {..} =
-  select ++ " " ++ (formatIdentifier' opt pgfIdentifier) where
+queryPrefix :: PGFunction -> TemplateBuilder String
+queryPrefix PGFunction {..} = intercalate " " <$> sequence [select, formatIdentifier' pgfIdentifier] where
+  select = case pgfResult of
+    PGTable _     -> return $ mkSelect AsRow
+    PGSetOf [t]   -> mkSelect . ($ t) . pboSetOfReturnType <$> ask
+    PGSetOf _     -> return $ mkSelect AsRow
+    _             -> return $ mkSelect AsField
 
-    select = case pgfResult of
-      PGTable _     -> mkSelect AsRow
-      PGSetOf [t]   -> mkSelect . pboSetOfReturnType $ t
-      PGSetOf _     -> mkSelect AsRow
-      _             -> mkSelect AsField
-
-    mkSelect AsRow   = "select * from"
-    mkSelect AsField = "select"
+  mkSelect AsRow   = "select * from"
+  mkSelect AsField = "select"
 
 
 
@@ -359,14 +367,14 @@ data FormatterOptions = FormatterOptions {
   } deriving (Show, Eq, Lift)
 
 
-formatIdentifier' :: PostgresBindOptions -> PGIdentifier -> String
-formatIdentifier' PostgresBindOptions {..} PGIdentifier {..} = maybe
-  pgiName
-  (++ ("." ++ pgiName))
-  (pgiSchema <|> pboDefaultSchema)
+formatIdentifier' :: PGIdentifier -> TemplateBuilder String
+formatIdentifier' PGIdentifier {..} = (pboDefaultSchema <$> ask)
+  >>= return
+  . maybe pgiName (++ ("." ++ pgiName))
+  . (pgiSchema <|>)
 
-formatType' :: PostgresBindOptions -> PGType -> String
-formatType' opt PGType {..} = formatIdentifier' opt pgtIdentifier
+formatType' :: PGType -> TemplateBuilder String
+formatType' PGType {..} = formatIdentifier' pgtIdentifier
 
 
 type Formatter a = a -> ReaderT FormatterOptions Maybe Builder
