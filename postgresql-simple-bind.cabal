@@ -90,7 +90,9 @@ test-suite tests
                , hspec
                , postgresql-simple >= 0.5.2 && < 0.6
                , postgresql-simple-bind
+               , tagged
                , text >= 1.2.2 && < 1.3
+               , QuickCheck
 
   default-language:    Haskell2010
 

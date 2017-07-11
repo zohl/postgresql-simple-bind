@@ -1,6 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
+import Data.Proxy (Proxy(..))
+import Data.Tagged (Tagged(..), tagWith)
+import Data.Either (isRight)
+import Control.Monad (liftM2)
 import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
 import Data.Bifunctor (first)
 import Data.Default (def)
@@ -9,7 +14,46 @@ import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGType(..))
 import Text.Heredoc (str)
 import Test.Hspec
+import Test.Hspec.QuickCheck (prop)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, oneof, choose)
+import qualified Data.Text as T
 
+
+data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
+
+instance Arbitrary TestPGNormalIdentifier where
+  arbitrary = sized $ \n -> fmap TestPGNormalIdentifier $ liftM2 (:)
+    (arbitraryChar True)
+    (sequence . replicate (n-1) $ arbitraryChar False) where
+      arbitraryChar :: Bool -> Gen Char
+      arbitraryChar isFirst = oneof $ (if isFirst then id else ([return '$', choose ('0', '9')] ++)) $ [
+          return '_'
+        , choose ('A', 'Z')
+        , choose ('a', 'z')]
+
+
+class PGSql a where
+  render :: a -> Text
+
+instance PGSql TestPGNormalIdentifier where
+  render (TestPGNormalIdentifier s) = T.pack s
+
+
+propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
+  => Tagged a (Parser b)
+  -> String
+  -> (b -> Expectation)
+  -> Spec
+propParser p name t = prop name property where
+
+  property :: a -> Expectation
+  property x = test (parseOnly (unTagged p <* endOfInput) (render x))
+
+  test :: Either String b -> Expectation
+  test result = either
+    (const $ result `shouldSatisfy` isRight)
+    t
+    result
 
 main :: IO ()
 main = hspec spec
@@ -21,8 +65,14 @@ testParser parser text result =
   (first ((prefix ++) . show) result) where
     prefix = either id (const "") $ parseOnly (fail "") ""
 
+
 spec :: Spec
 spec = do
+
+  describe "pgNormalIdentifier" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
+    prop' "the first symbol is not '$'" (flip shouldSatisfy $ \s -> (T.head s) /= '$')
+    prop' "stored in lowercase" (\x -> x `shouldBe` (T.toLower x))
 
   describe "pgComment" $ do
     let test t = testParser pgComment t . Right

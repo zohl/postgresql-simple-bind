@@ -29,6 +29,7 @@
 module Database.PostgreSQL.Simple.Bind.Parser (
     parsePGFunction
   , pgIdentifier
+  , pgNormalIdentifier
   , pgType
   , pgResult
   , pgString
