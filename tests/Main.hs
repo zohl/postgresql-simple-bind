@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE DataKinds #-}
 
+import Data.Char (ord)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
 import Data.Either (isRight)
@@ -15,9 +18,10 @@ import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumen
 import Text.Heredoc (str)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, oneof, choose)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, oneof, choose, suchThat)
 import qualified Data.Text as T
 
+import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
 data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
 
@@ -31,6 +35,13 @@ instance Arbitrary TestPGNormalIdentifier where
         , choose ('A', 'Z')
         , choose ('a', 'z')]
 
+data TestPGQuotedString (q :: Symbol) = TestPGQuotedString String deriving (Show)
+
+instance (KnownSymbol q) => Arbitrary (TestPGQuotedString q) where
+  arbitrary = sized $ \n -> fmap (TestPGQuotedString . concat) . sequence . replicate n $
+    (\c -> if c == (head . symbolVal $ (Proxy :: Proxy q)) then [c, c] else [c]) <$>
+      (arbitrary `suchThat` ((\x -> x >= 32 && x < 128) . ord))
+
 
 class PGSql a where
   render :: a -> Text
@@ -38,6 +49,8 @@ class PGSql a where
 instance PGSql TestPGNormalIdentifier where
   render (TestPGNormalIdentifier s) = T.pack s
 
+instance (KnownSymbol q) => PGSql (TestPGQuotedString q) where
+  render (TestPGQuotedString s) = T.pack (s ++ (symbolVal (Proxy :: Proxy q)))
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
@@ -71,8 +84,15 @@ spec = do
 
   describe "pgNormalIdentifier" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
-    prop' "the first symbol is not '$'" (flip shouldSatisfy $ \s -> (T.head s) /= '$')
-    prop' "stored in lowercase" (\x -> x `shouldBe` (T.toLower x))
+    prop' "the first symbol is not '$'" . flip shouldSatisfy $ \s -> (T.head s) /= '$'
+    prop' "stored in lowercase" $ \x -> x `shouldBe` (T.toLower x)
+
+  describe "pgQuotedString" $ do
+    let prop1' = propParser (tagWith (Proxy :: Proxy (TestPGQuotedString "'")) (pgQuotedString '\''))
+    prop1' "string is surrounded by single quotes" . flip shouldSatisfy $ \x -> T.head x == T.last x && T.head x == '\''
+
+    let prop2' = propParser (tagWith (Proxy :: Proxy (TestPGQuotedString "\"")) (pgQuotedString '"'))
+    prop2' "string is surrounded by double quotes" . flip shouldSatisfy $ \x -> T.head x == T.last x && T.head x == '"'
 
   describe "pgComment" $ do
     let test t = testParser pgComment t . Right

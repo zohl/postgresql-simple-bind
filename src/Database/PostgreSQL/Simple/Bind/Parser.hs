@@ -30,6 +30,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
     parsePGFunction
   , pgIdentifier
   , pgNormalIdentifier
+  , pgQuotedString
   , pgType
   , pgResult
   , pgString
