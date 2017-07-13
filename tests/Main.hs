@@ -21,7 +21,12 @@ import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Gen, Arbitrary(..), sized, oneof, choose, suchThat)
 import qualified Data.Text as T
 
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolVal)
+
+
+class PGSql a where
+  render :: a -> Text
+
 
 data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
 
@@ -35,6 +40,10 @@ instance Arbitrary TestPGNormalIdentifier where
         , choose ('A', 'Z')
         , choose ('a', 'z')]
 
+instance PGSql TestPGNormalIdentifier where
+  render (TestPGNormalIdentifier s) = T.pack s
+
+
 data TestPGQuotedString (q :: Symbol) = TestPGQuotedString String deriving (Show)
 
 instance (KnownSymbol q) => Arbitrary (TestPGQuotedString q) where
@@ -42,15 +51,9 @@ instance (KnownSymbol q) => Arbitrary (TestPGQuotedString q) where
     (\c -> if c == (head . symbolVal $ (Proxy :: Proxy q)) then [c, c] else [c]) <$>
       (arbitrary `suchThat` ((\x -> x >= 32 && x < 128) . ord))
 
-
-class PGSql a where
-  render :: a -> Text
-
-instance PGSql TestPGNormalIdentifier where
-  render (TestPGNormalIdentifier s) = T.pack s
-
 instance (KnownSymbol q) => PGSql (TestPGQuotedString q) where
   render (TestPGQuotedString s) = T.pack (s ++ (symbolVal (Proxy :: Proxy q)))
+
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
@@ -68,6 +71,9 @@ propParser p name t = prop name property where
     t
     result
 
+proxyMap :: Proxy (f :: Symbol -> *) -> Proxy a -> Proxy (f a)
+proxyMap _ _ = Proxy
+
 main :: IO ()
 main = hspec spec
 
@@ -81,18 +87,29 @@ testParser parser text result =
 
 spec :: Spec
 spec = do
-
   describe "pgNormalIdentifier" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
     prop' "the first symbol is not '$'" . flip shouldSatisfy $ \s -> (T.head s) /= '$'
     prop' "stored in lowercase" $ \x -> x `shouldBe` (T.toLower x)
 
   describe "pgQuotedString" $ do
-    let prop1' = propParser (tagWith (Proxy :: Proxy (TestPGQuotedString "'")) (pgQuotedString '\''))
-    prop1' "string is surrounded by single quotes" . flip shouldSatisfy $ \x -> T.head x == T.last x && T.head x == '\''
+    let prop' q = patternMatch (someSymbolVal [q]) where
+          patternMatch (SomeSymbol x) = propParser
+            (tagWith (proxyMap (Proxy :: Proxy TestPGQuotedString) x) (pgQuotedString q))
 
-    let prop2' = propParser (tagWith (Proxy :: Proxy (TestPGQuotedString "\"")) (pgQuotedString '"'))
-    prop2' "string is surrounded by double quotes" . flip shouldSatisfy $ \x -> T.head x == T.last x && T.head x == '"'
+    let qs = ['"', '\'']
+
+    let ps = [
+            ("string is surrounded by quotes", \q -> flip shouldSatisfy $ \x -> T.head x == q && T.last x == q)
+          , ("internal quotes are doubled", \q -> flip shouldSatisfy $
+              null . filter ((/= 0) . (`mod` 2)) . map T.length
+                   . filter ((== q) . T.head) . T.group
+                   . T.tail . T.init)]
+
+    mapM_
+      (\(q, name, test) -> prop' q (name ++ "(" ++ [q] ++ ")") (test q))
+      [(q, name, test) | q <- qs, (name, test) <- ps]
+
 
   describe "pgComment" $ do
     let test t = testParser pgComment t . Right
