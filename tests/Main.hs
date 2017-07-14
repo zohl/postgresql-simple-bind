@@ -4,7 +4,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE DataKinds #-}
 
-import Data.Char (ord)
+import Data.Char (ord, isNumber)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
 import Data.Either (isRight)
@@ -27,18 +27,18 @@ import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolV
 class PGSql a where
   render :: a -> Text
 
+inClass :: String -> [Gen Char]
+inClass (x:'-':y:xs) = (choose (x, y)):(inClass xs)
+inClass (x:xs)       = (return x):(inClass xs)
+inClass []           = []
+
 
 data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
 
 instance Arbitrary TestPGNormalIdentifier where
   arbitrary = sized $ \n -> fmap TestPGNormalIdentifier $ liftM2 (:)
-    (arbitraryChar True)
-    (sequence . replicate (n-1) $ arbitraryChar False) where
-      arbitraryChar :: Bool -> Gen Char
-      arbitraryChar isFirst = oneof $ (if isFirst then id else ([return '$', choose ('0', '9')] ++)) $ [
-          return '_'
-        , choose ('A', 'Z')
-        , choose ('a', 'z')]
+    (oneof . inClass $ "A-Za-z_")
+    (sequence . replicate (n-1) . oneof . inClass $ "A-Za-z0-9_$")
 
 instance PGSql TestPGNormalIdentifier where
   render (TestPGNormalIdentifier s) = T.pack s
@@ -53,6 +53,18 @@ instance (KnownSymbol q) => Arbitrary (TestPGQuotedString q) where
 
 instance (KnownSymbol q) => PGSql (TestPGQuotedString q) where
   render (TestPGQuotedString s) = T.pack (s ++ (symbolVal (Proxy :: Proxy q)))
+
+
+data TestPGTag = TestPGTag String deriving (Show)
+
+instance Arbitrary TestPGTag where
+  arbitrary = fmap TestPGTag $ oneof [nonEmptyTag, return ""] where
+    nonEmptyTag = sized $ \n -> liftM2 (:)
+      (oneof . inClass $ "A-Za-z_")
+      (sequence . replicate (n-1) . oneof . inClass $ "A-Za-z0-9_")
+
+instance PGSql TestPGTag where
+  render (TestPGTag s) = T.pack s
 
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
@@ -110,6 +122,9 @@ spec = do
       (\(q, name, test) -> prop' q (name ++ "(" ++ [q] ++ ")") (test q))
       [(q, name, test) | q <- qs, (name, test) <- ps]
 
+  describe "pgTag" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGTag) pgTag)
+    prop' "the first symbol is not a number" . flip shouldSatisfy $ \s -> T.null s || (not . isNumber . T.head $ s)
 
   describe "pgComment" $ do
     let test t = testParser pgComment t . Right
