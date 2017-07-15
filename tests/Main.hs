@@ -5,6 +5,7 @@
 {-# LANGUAGE DataKinds #-}
 
 import Data.Char (ord, isNumber)
+import Data.List (isInfixOf, isSuffixOf)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
 import Data.Either (isRight)
@@ -25,7 +26,7 @@ import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolV
 
 
 class PGSql a where
-  render :: a -> Text
+  render :: a -> String
 
 inClass :: String -> [Gen Char]
 inClass (x:'-':y:xs) = (choose (x, y)):(inClass xs)
@@ -41,18 +42,7 @@ instance Arbitrary TestPGNormalIdentifier where
     (sequence . replicate (n-1) . oneof . inClass $ "A-Za-z0-9_$")
 
 instance PGSql TestPGNormalIdentifier where
-  render (TestPGNormalIdentifier s) = T.pack s
-
-
-data TestPGQuotedString (q :: Symbol) = TestPGQuotedString String deriving (Show)
-
-instance (KnownSymbol q) => Arbitrary (TestPGQuotedString q) where
-  arbitrary = sized $ \n -> fmap (TestPGQuotedString . concat) . sequence . replicate n $
-    (\c -> if c == (head . symbolVal $ (Proxy :: Proxy q)) then [c, c] else [c]) <$>
-      (arbitrary `suchThat` ((\x -> x >= 32 && x < 128) . ord))
-
-instance (KnownSymbol q) => PGSql (TestPGQuotedString q) where
-  render (TestPGQuotedString s) = T.pack (s ++ (symbolVal (Proxy :: Proxy q)))
+  render (TestPGNormalIdentifier s) = s
 
 
 data TestPGTag = TestPGTag String deriving (Show)
@@ -64,7 +54,33 @@ instance Arbitrary TestPGTag where
       (sequence . replicate (n-1) . oneof . inClass $ "A-Za-z0-9_")
 
 instance PGSql TestPGTag where
-  render (TestPGTag s) = T.pack s
+  render (TestPGTag s) = s
+
+
+data TestPGQuotedString (q :: Symbol) = TestPGQuotedString String deriving (Show)
+
+instance (KnownSymbol q) => Arbitrary (TestPGQuotedString q) where
+  arbitrary = sized $ \n -> fmap (TestPGQuotedString . concat) . sequence . replicate n $
+    (\c -> if c == (head . symbolVal $ (Proxy :: Proxy q)) then [c, c] else [c]) <$>
+      (arbitrary `suchThat` ((\x -> x >= 32 && x < 128) . ord))
+
+instance (KnownSymbol q) => PGSql (TestPGQuotedString q) where
+  render (TestPGQuotedString s) = s ++ (symbolVal (Proxy :: Proxy q))
+
+
+data TestPGDollarQuotedString (tag :: Symbol) = TestPGDollarQuotedString String deriving (Show)
+
+instance (KnownSymbol tag) => Arbitrary (TestPGDollarQuotedString tag) where
+  arbitrary = sized $ \n -> let
+    tagValue = render $ TestPGTag (symbolVal (Proxy :: Proxy tag))
+    arbitraryString = sequence . replicate n $ (arbitrary `suchThat` ((\x -> x >= 32 && x < 128) . ord))
+    in fmap TestPGDollarQuotedString $
+       arbitraryString `suchThat` (\s -> (not . isInfixOf ("$" ++ tagValue ++ "$") $ s) && (not . isSuffixOf "$" $ s))
+
+instance (KnownSymbol tag) => PGSql (TestPGDollarQuotedString tag) where
+  render (TestPGDollarQuotedString s) = let
+    tagValue = render $ TestPGTag (symbolVal (Proxy :: Proxy tag))
+    in concat [s, "$", tagValue, "$"]
 
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
@@ -75,7 +91,7 @@ propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
 propParser p name t = prop name property where
 
   property :: a -> Expectation
-  property x = test (parseOnly (unTagged p <* endOfInput) (render x))
+  property x = test (parseOnly (unTagged p <* endOfInput) (T.pack . render $ x))
 
   test :: Either String b -> Expectation
   test result = either
@@ -104,27 +120,37 @@ spec = do
     prop' "the first symbol is not '$'" . flip shouldSatisfy $ \s -> (T.head s) /= '$'
     prop' "stored in lowercase" $ \x -> x `shouldBe` (T.toLower x)
 
+  describe "pgTag" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGTag) pgTag)
+    prop' "the first symbol is not a number" . flip shouldSatisfy $ \s -> T.null s || (not . isNumber . T.head $ s)
+
   describe "pgQuotedString" $ do
     let prop' q = patternMatch (someSymbolVal [q]) where
           patternMatch (SomeSymbol x) = propParser
             (tagWith (proxyMap (Proxy :: Proxy TestPGQuotedString) x) (pgQuotedString q))
-
     let qs = ['"', '\'']
-
     let ps = [
             ("string is surrounded by quotes", \q -> flip shouldSatisfy $ \x -> T.head x == q && T.last x == q)
           , ("internal quotes are doubled", \q -> flip shouldSatisfy $
               null . filter ((/= 0) . (`mod` 2)) . map T.length
                    . filter ((== q) . T.head) . T.group
                    . T.tail . T.init)]
-
     mapM_
       (\(q, name, test) -> prop' q (name ++ "(" ++ [q] ++ ")") (test q))
       [(q, name, test) | q <- qs, (name, test) <- ps]
 
-  describe "pgTag" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGTag) pgTag)
-    prop' "the first symbol is not a number" . flip shouldSatisfy $ \s -> T.null s || (not . isNumber . T.head $ s)
+  describe "pgDollarQuotedString" $ do
+    let prop' tag = patternMatch (someSymbolVal tag) where
+          patternMatch (SomeSymbol x) = propParser
+            (tagWith
+               (proxyMap (Proxy :: Proxy TestPGDollarQuotedString) x)
+               (pgDollarQuotedString $ T.pack ("$"++tag++"$")))
+    let tags = ["", "foo", "bar_42"]
+    let ps = [
+            ("string ends with the tag", \tag -> flip shouldSatisfy $ T.isSuffixOf (T.pack ("$" ++ tag ++ "$")))]
+    mapM_
+      (\(tag, name, test) -> prop' tag (name ++ "(" ++ tag ++ ")") (test tag))
+      [(tag, name, test) | tag <- tags, (name, test) <- ps]
 
   describe "pgComment" $ do
     let test t = testParser pgComment t . Right

@@ -31,6 +31,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgIdentifier
   , pgNormalIdentifier
   , pgQuotedString
+  , pgDollarQuotedString
   , pgTag
   , pgType
   , pgResult
