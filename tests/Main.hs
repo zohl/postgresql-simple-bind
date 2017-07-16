@@ -24,6 +24,12 @@ import qualified Data.Text as T
 
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolVal)
 
+proxyArbitrary :: (Arbitrary a) => Proxy a -> Gen a
+proxyArbitrary _ = arbitrary
+
+proxyMap :: Proxy (f :: Symbol -> *) -> Proxy a -> Proxy (f a)
+proxyMap _ _ = Proxy
+
 
 class PGSql a where
   render :: a -> String
@@ -83,6 +89,28 @@ instance (KnownSymbol tag) => PGSql (TestPGDollarQuotedString tag) where
     in concat [s, "$", tagValue, "$"]
 
 
+data TestPGString = TestPGString String deriving (Show)
+
+instance Arbitrary TestPGString where
+  arbitrary = TestPGString <$> oneof [
+      arbitraryQuotedString '"'
+    , arbitraryQuotedString '\"'
+    , (arbitrary :: Gen TestPGTag) >>= arbitraryDollarQuotedString . render
+    ] where
+
+    arbitraryQuotedString q = patternMatch (someSymbolVal [q]) where
+      patternMatch (SomeSymbol x) = (q:) . render <$>
+        (proxyArbitrary $ proxyMap (Proxy :: Proxy TestPGQuotedString) x)
+
+    arbitraryDollarQuotedString tag = patternMatch (someSymbolVal tag) where
+      patternMatch (SomeSymbol x) = (("$" ++ tag ++ "$") ++) . render <$>
+        (proxyArbitrary $ proxyMap (Proxy :: Proxy TestPGDollarQuotedString) x)
+
+
+instance PGSql TestPGString where
+  render (TestPGString s) = s
+
+
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
@@ -98,9 +126,6 @@ propParser p name t = prop name property where
     (const $ result `shouldSatisfy` isRight)
     t
     result
-
-proxyMap :: Proxy (f :: Symbol -> *) -> Proxy a -> Proxy (f a)
-proxyMap _ _ = Proxy
 
 main :: IO ()
 main = hspec spec
@@ -152,6 +177,11 @@ spec = do
       (\(tag, name, test) -> prop' tag (name ++ "(" ++ tag ++ ")") (test tag))
       [(tag, name, test) | tag <- tags, (name, test) <- ps]
 
+  describe "pgString" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGString) pgString)
+    prop' "parsing works" . flip shouldSatisfy $ const True
+
+
   describe "pgComment" $ do
     let test t = testParser pgComment t . Right
 
@@ -164,29 +194,6 @@ spec = do
       test
         "/* outer comment /* inner comment */ outer comment */"
         "/* outer comment /* inner comment */ outer comment */"
-
-  describe "pgString" $ do
-    let test t = testParser pgString t (Right t)
-    it "works with single-quoted strings" $ do
-      test "'foo bar baz'"
-      test "'foo ''bar'' baz'"
-      test "'foo ''''bar'''' baz'"
-
-    it "works with double-quoted strings" $ do
-      test "\"foo bar baz\""
-      test "\"foo \"\"bar\"\" baz\""
-      test "\"foo \"\"\"\"'bar'\"\"\"\" baz\""
-
-    it "works with dollar-quoted strings" $ do
-      test "$$foo bar baz$$"
-      test "$$foo $ bar baz$$"
-      test "$$foo $ bar $ baz$$"
-
-    it "works with tagged dollar-quoted strings" $ do
-      test "$qux$foo bar baz$qux$"
-      test "$qux$foo $$ bar baz$qux$"
-      test "$qux$foo bar $qux baz$qux$"
-      test "$qux$foo bar $qux2$ baz$qux$"
 
 
   describe "pgColumn" $ do
