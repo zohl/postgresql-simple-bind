@@ -30,13 +30,15 @@ module Database.PostgreSQL.Simple.Bind.Parser (
     parsePGFunction
   , pgIdentifier
   , pgNormalIdentifier
+  , pgTag
   , pgQuotedString
   , pgDollarQuotedString
-  , pgTag
+  , pgString
+  , pgLineComment
+  , pgBlockComment
+  , pgComment
   , pgType
   , pgResult
-  , pgString
-  , pgComment
   , pgColumn
   , pgArgument
   , pgArguments
@@ -95,11 +97,13 @@ asciiCIs []     = return ()
 asciiCIs (w:ws) = asciiCI w *> ss *> asciiCIs ws
 
 
--- | Parser for a comment
-pgComment :: Parser Text
-pgComment = pgLineComment <|> pgBlockComment where
-  pgLineComment = (liftA2 (<>) (string "--") (takeWhile (not . isEndOfLine))) <* (endOfLine <|> pure ())
-  pgBlockComment = liftA2 (<>) (string "/*") pgBlockCommentTail
+-- | Parser for a line comment.
+pgLineComment :: Parser Text
+pgLineComment = (liftA2 (<>) (string "--") (takeWhile (not . isEndOfLine))) <* (endOfLine <|> pure ())
+
+-- | Parser for a block comment.
+pgBlockComment :: Parser Text
+pgBlockComment = liftA2 (<>) (string "/*") pgBlockCommentTail where
   pgBlockCommentTail = do
     (s, c) <- liftA2 (,)
       (takeWhile (\c -> c /= '*' && c /= '/'))
@@ -113,6 +117,10 @@ pgComment = pgLineComment <|> pgBlockComment where
       (liftA2 (<>)
          ((T.snoc s) <$> anyChar)
          pgBlockCommentTail)
+
+-- | Parser for a comment.
+pgComment :: Parser Text
+pgComment = pgLineComment <|> pgBlockComment
 
 
 -- | Parser for a string surrounded by "'" or "\"".
