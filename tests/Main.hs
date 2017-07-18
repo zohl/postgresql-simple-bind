@@ -3,8 +3,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 
-import Data.Char (ord, isNumber)
+import Data.Char (chr, isNumber)
 import Data.List (isInfixOf, isSuffixOf)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
@@ -19,7 +20,7 @@ import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumen
 import Text.Heredoc (str)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, oneof, choose, suchThat)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat)
 import qualified Data.Text as T
 
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolVal)
@@ -34,18 +35,36 @@ proxyMap _ _ = Proxy
 class PGSql a where
   render :: a -> String
 
-inClass :: String -> [Gen Char]
-inClass (x:'-':y:xs) = (choose (x, y)):(inClass xs)
-inClass (x:xs)       = (return x):(inClass xs)
-inClass []           = []
+inClass :: String -> Gen Char
+inClass = oneof . inClass' where
+  inClass' (x:'-':y:xs) = (choose (x, y)):(inClass' xs)
+  inClass' (x:xs)       = (return x):(inClass' xs)
+  inClass' []           = []
+
+arbitraryString :: Gen Char -> Gen String
+arbitraryString c = sized $ \n -> sequence . replicate n $ c
+
+arbitraryString' :: (Gen Char, Gen Char) -> Gen String
+arbitraryString' (c, c') = sized $ \case
+  0 -> return []
+  1 -> pure <$> c
+  n -> liftM2 (:) c (resize (n-1) $ arbitraryString c')
+
+
+charASCII :: Gen Char
+charASCII = inClass [chr 32, '-', chr 127]
+
+charId :: (Gen Char, Gen Char)
+charId = (inClass "A-Za-z_", inClass "A-Za-z0-9_$")
+
+charTag :: (Gen Char, Gen Char)
+charTag = (inClass "A-Za-z_", inClass "A-Za-z0-9_")
 
 
 data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
 
 instance Arbitrary TestPGNormalIdentifier where
-  arbitrary = sized $ \n -> fmap TestPGNormalIdentifier $ liftM2 (:)
-    (oneof . inClass $ "A-Za-z_")
-    (sequence . replicate (n-1) . oneof . inClass $ "A-Za-z0-9_$")
+  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId) `suchThat` ((> 0) . length)
 
 instance PGSql TestPGNormalIdentifier where
   render (TestPGNormalIdentifier s) = s
@@ -54,10 +73,7 @@ instance PGSql TestPGNormalIdentifier where
 data TestPGTag = TestPGTag String deriving (Show)
 
 instance Arbitrary TestPGTag where
-  arbitrary = fmap TestPGTag $ oneof [nonEmptyTag, return ""] where
-    nonEmptyTag = sized $ \n -> liftM2 (:)
-      (oneof . inClass $ "A-Za-z_")
-      (sequence . replicate (n-1) . oneof . inClass $ "A-Za-z0-9_")
+  arbitrary = TestPGTag <$> oneof [arbitraryString' charTag, return ""] where
 
 instance PGSql TestPGTag where
   render (TestPGTag s) = s
@@ -66,9 +82,8 @@ instance PGSql TestPGTag where
 data TestPGQuotedString (q :: Symbol) = TestPGQuotedString String deriving (Show)
 
 instance (KnownSymbol q) => Arbitrary (TestPGQuotedString q) where
-  arbitrary = sized $ \n -> fmap (TestPGQuotedString . concat) . sequence . replicate n $
-    (\c -> if c == (head . symbolVal $ (Proxy :: Proxy q)) then [c, c] else [c]) <$>
-      (arbitrary `suchThat` ((\x -> x >= 32 && x < 128) . ord))
+  arbitrary = TestPGQuotedString . concatMap doubleQuote <$> arbitraryString charASCII where
+    doubleQuote c = if c == (head . symbolVal $ (Proxy :: Proxy q)) then [c, c] else [c]
 
 instance (KnownSymbol q) => PGSql (TestPGQuotedString q) where
   render (TestPGQuotedString s) = s ++ (symbolVal (Proxy :: Proxy q))
@@ -77,11 +92,11 @@ instance (KnownSymbol q) => PGSql (TestPGQuotedString q) where
 data TestPGDollarQuotedString (tag :: Symbol) = TestPGDollarQuotedString String deriving (Show)
 
 instance (KnownSymbol tag) => Arbitrary (TestPGDollarQuotedString tag) where
-  arbitrary = sized $ \n -> let
+  arbitrary = let
     tagValue = render $ TestPGTag (symbolVal (Proxy :: Proxy tag))
-    arbitraryString = sequence . replicate n $ (arbitrary `suchThat` ((\x -> x >= 32 && x < 128) . ord))
-    in fmap TestPGDollarQuotedString $
-       arbitraryString `suchThat` (\s -> (not . isInfixOf ("$" ++ tagValue ++ "$") $ s) && (not . isSuffixOf "$" $ s))
+    in TestPGDollarQuotedString <$> arbitraryString charASCII
+      `suchThat` (not . isInfixOf ("$" ++ tagValue ++ "$"))
+      `suchThat` (not . isSuffixOf "$")
 
 instance (KnownSymbol tag) => PGSql (TestPGDollarQuotedString tag) where
   render (TestPGDollarQuotedString s) = let
@@ -105,7 +120,6 @@ instance Arbitrary TestPGString where
     arbitraryDollarQuotedString tag = patternMatch (someSymbolVal tag) where
       patternMatch (SomeSymbol x) = (("$" ++ tag ++ "$") ++) . render <$>
         (proxyArbitrary $ proxyMap (Proxy :: Proxy TestPGDollarQuotedString) x)
-
 
 instance PGSql TestPGString where
   render (TestPGString s) = s
@@ -180,7 +194,6 @@ spec = do
   describe "pgString" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGString) pgString)
     prop' "parsing works" . flip shouldSatisfy $ const True
-
 
   describe "pgComment" $ do
     let test t = testParser pgComment t . Right
