@@ -125,6 +125,15 @@ instance PGSql TestPGString where
   render (TestPGString s) = s
 
 
+data TestPGLineComment = TestPGLineComment String deriving (Show)
+
+instance Arbitrary TestPGLineComment where
+  arbitrary = TestPGLineComment . ("--" ++) <$> arbitraryString charASCII
+
+instance PGSql TestPGLineComment where
+  render (TestPGLineComment s) = s
+
+
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
@@ -194,6 +203,12 @@ spec = do
   describe "pgString" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGString) pgString)
     prop' "parsing works" . flip shouldSatisfy $ const True
+
+  describe "pgLineComment" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGLineComment) pgLineComment)
+    prop' "starts with \"--\"" . flip shouldSatisfy $ T.isPrefixOf "--"
+
+
 
   describe "pgComment" $ do
     let test t = testParser pgComment t . Right
