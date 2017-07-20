@@ -105,18 +105,11 @@ pgLineComment = (liftA2 (<>) (string "--") (takeWhile (not . isEndOfLine))) <* (
 pgBlockComment :: Parser Text
 pgBlockComment = liftA2 (<>) (string "/*") pgBlockCommentTail where
   pgBlockCommentTail = do
-    (s, c) <- liftA2 (,)
-      (takeWhile (\c -> c /= '*' && c /= '/'))
-      peekChar'
-    (<|>)
-      (if c == '*'
-          then ((s <>) <$> (string "*/"))
-          else liftA2 (<>)
-                 ((s <>) <$> pgBlockComment)
-                 pgBlockCommentTail)
-      (liftA2 (<>)
-         ((T.snoc s) <$> anyChar)
-         pgBlockCommentTail)
+    s <- takeWhile (\c -> (c /= '/') && (c /= '*'))
+    fmap (s <>) $ foldl1 (<|>) [
+        (liftA2 (<>) pgBlockComment pgBlockCommentTail)
+      , (string "*/")
+      , (T.cons <$> anyChar <*> pgBlockCommentTail)]
 
 -- | Parser for a comment.
 pgComment :: Parser Text

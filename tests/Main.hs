@@ -7,12 +7,12 @@
 
 import Data.Char (chr, isNumber)
 import Data.List (isInfixOf, isSuffixOf)
+import Data.Maybe (listToMaybe, fromMaybe)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
 import Data.Either (isRight)
 import Control.Monad (liftM2)
 import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
-import Data.Bifunctor (first)
 import Data.Default (def)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
@@ -20,8 +20,9 @@ import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumen
 import Text.Heredoc (str)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency)
 import qualified Data.Text as T
+import qualified Data.Bifunctor as B(first)
 
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolVal)
 
@@ -50,7 +51,6 @@ arbitraryString' (c, c') = sized $ \case
   1 -> pure <$> c
   n -> liftM2 (:) c (resize (n-1) $ arbitraryString c')
 
-
 charASCII :: Gen Char
 charASCII = inClass [chr 32, '-', chr 127]
 
@@ -59,6 +59,10 @@ charId = (inClass "A-Za-z_", inClass "A-Za-z0-9_$")
 
 charTag :: (Gen Char, Gen Char)
 charTag = (inClass "A-Za-z_", inClass "A-Za-z0-9_")
+
+arbitrarySumDecomposition :: Int -> Gen [Int]
+arbitrarySumDecomposition 0 = return []
+arbitrarySumDecomposition n = choose (1, n) >>= \k -> (k:) <$> (arbitrarySumDecomposition (n-k))
 
 
 data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
@@ -128,10 +132,46 @@ instance PGSql TestPGString where
 data TestPGLineComment = TestPGLineComment String deriving (Show)
 
 instance Arbitrary TestPGLineComment where
-  arbitrary = TestPGLineComment . ("--" ++) <$> arbitraryString charASCII
+  arbitrary = TestPGLineComment <$> arbitraryString charASCII
 
 instance PGSql TestPGLineComment where
-  render (TestPGLineComment s) = s
+  render (TestPGLineComment s) = "--" ++ s
+
+
+data TestPGBlockComment
+  = TestPGBlockCommentGroup [TestPGBlockComment]
+  | TestPGBlockCommentElement String
+  deriving (Show, Eq)
+
+instance Arbitrary TestPGBlockComment where
+  arbitrary = TestPGBlockCommentGroup <$> (sized $ \n -> arbitrarySumDecomposition n
+    >>= mapM mkElement . zip (map ((== 0) . (`mod` 2)) [(1::Int)..])) where
+      mkElement (isGroup, s) = resize s $ if isGroup
+        then (arbitrary :: Gen TestPGBlockComment)
+        else (TestPGBlockCommentElement <$> (arbitraryString $ frequency [(15, charASCII), (1, return '\n')])
+                    `suchThat` (not . isInfixOf "/*")
+                    `suchThat` (not . isInfixOf "*/")
+                    `suchThat` (not . isSuffixOf "/")
+                    `suchThat` (not . isSuffixOf "*"))
+
+
+  shrink (TestPGBlockCommentGroup xs) = (concatMap shrink . filter isGroup $ xs)
+                                     ++ (if (xs' /= xs)
+                                         then [TestPGBlockCommentGroup xs']
+                                         else []) where
+    xs' = map (\x -> fromMaybe x . listToMaybe . shrink $ x) xs
+
+    isGroup :: TestPGBlockComment -> Bool
+    isGroup (TestPGBlockCommentGroup _) = True
+    isGroup _                           = False
+
+  shrink (TestPGBlockCommentElement s) = if length s > 3
+    then [TestPGBlockCommentElement (head s:' ':last s:[])]
+    else []
+
+instance PGSql TestPGBlockComment where
+  render (TestPGBlockCommentGroup xs) = "/*" ++ (concatMap render xs) ++ "*/"
+  render (TestPGBlockCommentElement x) = x
 
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
@@ -157,7 +197,7 @@ testParser :: (Show a, Eq a) => Parser a -> Text -> Either ParserException a -> 
 testParser parser text result =
   (parseOnly (parser <* endOfInput) text)
   `shouldBe`
-  (first ((prefix ++) . show) result) where
+  (B.first ((prefix ++) . show) result) where
     prefix = either id (const "") $ parseOnly (fail "") ""
 
 
@@ -208,6 +248,10 @@ spec = do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGLineComment) pgLineComment)
     prop' "starts with \"--\"" . flip shouldSatisfy $ T.isPrefixOf "--"
 
+  describe "pgBlockComment" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGBlockComment) pgBlockComment)
+    prop' "starts with /*" . flip shouldSatisfy $ T.isPrefixOf "/*"
+    prop' "ends with */" . flip shouldSatisfy $ T.isSuffixOf "*/"
 
 
   describe "pgComment" $ do
