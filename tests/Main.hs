@@ -174,6 +174,17 @@ instance PGSql TestPGBlockComment where
   render (TestPGBlockCommentElement x) = x
 
 
+data TestPGComment = TestPGComment String deriving (Show)
+
+instance Arbitrary TestPGComment where
+  arbitrary = TestPGComment <$> oneof [
+      render <$> (arbitrary :: Gen TestPGLineComment)
+    , render <$> (arbitrary :: Gen TestPGBlockComment)]
+
+instance PGSql TestPGComment where
+  render (TestPGComment s) = s
+
+
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
@@ -253,19 +264,9 @@ spec = do
     prop' "starts with /*" . flip shouldSatisfy $ T.isPrefixOf "/*"
     prop' "ends with */" . flip shouldSatisfy $ T.isSuffixOf "*/"
 
-
-  describe "pgComment" $ do
-    let test t = testParser pgComment t . Right
-
-    it "works with inline comments" $ do
-      test "-- comment without end of line" "-- comment without end of line"
-      test "-- comment with end of line\n"  "-- comment with end of line"
-
-    it "works with block comments" $ do
-      test "/* simple comment */" "/* simple comment */"
-      test
-        "/* outer comment /* inner comment */ outer comment */"
-        "/* outer comment /* inner comment */ outer comment */"
+  describe "pgBlockComment" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGComment) pgComment)
+    prop' "parsing works" . flip shouldSatisfy $ const True
 
 
   describe "pgColumn" $ do
