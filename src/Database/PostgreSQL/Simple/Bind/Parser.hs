@@ -28,11 +28,11 @@
 
 module Database.PostgreSQL.Simple.Bind.Parser (
     parsePGFunction
-  , pgIdentifier
-  , pgNormalIdentifier
   , pgTag
   , pgQuotedString
   , pgDollarQuotedString
+  , pgNormalIdentifier
+  , pgIdentifier
   , pgString
   , pgLineComment
   , pgBlockComment

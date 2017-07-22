@@ -65,15 +65,6 @@ arbitrarySumDecomposition 0 = return []
 arbitrarySumDecomposition n = choose (1, n) >>= \k -> (k:) <$> (arbitrarySumDecomposition (n-k))
 
 
-data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
-
-instance Arbitrary TestPGNormalIdentifier where
-  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId) `suchThat` ((> 0) . length)
-
-instance PGSql TestPGNormalIdentifier where
-  render (TestPGNormalIdentifier s) = s
-
-
 data TestPGTag = TestPGTag String deriving (Show)
 
 instance Arbitrary TestPGTag where
@@ -127,6 +118,26 @@ instance Arbitrary TestPGString where
 
 instance PGSql TestPGString where
   render (TestPGString s) = s
+
+
+data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
+
+instance Arbitrary TestPGNormalIdentifier where
+  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId) `suchThat` ((> 0) . length)
+
+instance PGSql TestPGNormalIdentifier where
+  render (TestPGNormalIdentifier s) = s
+
+
+data TestPGIdentifier = TestPGIdentifier String deriving (Show)
+
+instance Arbitrary TestPGIdentifier where
+  arbitrary = TestPGIdentifier <$> oneof [
+      render <$> (arbitrary :: Gen TestPGNormalIdentifier)
+    , ('"':) . render <$> (arbitrary :: Gen (TestPGQuotedString "\""))]
+
+instance PGSql TestPGIdentifier where
+  render (TestPGIdentifier s) = s
 
 
 data TestPGLineComment = TestPGLineComment String deriving (Show)
@@ -214,11 +225,6 @@ testParser parser text result =
 
 spec :: Spec
 spec = do
-  describe "pgNormalIdentifier" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
-    prop' "the first symbol is not '$'" . flip shouldSatisfy $ \s -> (T.head s) /= '$'
-    prop' "stored in lowercase" $ \x -> x `shouldBe` (T.toLower x)
-
   describe "pgTag" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGTag) pgTag)
     prop' "the first symbol is not a number" . flip shouldSatisfy $ \s -> T.null s || (not . isNumber . T.head $ s)
@@ -255,6 +261,15 @@ spec = do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGString) pgString)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
+  describe "pgNormalIdentifier" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
+    prop' "the first symbol is not '$'" . flip shouldSatisfy $ \s -> (T.head s) /= '$'
+    prop' "stored in lowercase" $ \x -> x `shouldBe` (T.toLower x)
+
+  describe "pgIdentifier" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGIdentifier) pgIdentifier)
+    prop' "parsing works" $ flip shouldSatisfy $ const True
+
   describe "pgLineComment" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGLineComment) pgLineComment)
     prop' "starts with \"--\"" . flip shouldSatisfy $ T.isPrefixOf "--"
@@ -264,7 +279,7 @@ spec = do
     prop' "starts with /*" . flip shouldSatisfy $ T.isPrefixOf "/*"
     prop' "ends with */" . flip shouldSatisfy $ T.isSuffixOf "*/"
 
-  describe "pgBlockComment" $ do
+  describe "pgComment" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGComment) pgComment)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
@@ -354,23 +369,6 @@ spec = do
       test "variadic p bigint default 1"
         (DefaultValueNotExpected
           PGArgument { pgaMode = Variadic, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
-
-
-  describe "pgIdentifier" $ do
-    let test t = testParser pgIdentifier t . Right
-    it "works with simple identifiers" $ do
-      test "foo"     $ "foo"
-      test "_bar123" $ "_bar123"
-      test "baz$$$"  $ "baz$$$"
-
-    it "converts to lower case normal identifiers" $ do
-      test "Qux"  $ "qux"
-      test "QUUX" $ "quux"
-
-    it "works with quoted identifiers" $ do
-      test "\"Corge\""         $ "\"Corge\""
-      test "\"Grault\"\"123\"" $ "\"Grault\"\"123\""
-      test "\"Waldo !@ #$\""   $ "\"Waldo !@ #$\""
 
 
   describe "pgType" $ do
