@@ -31,9 +31,10 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgTag
   , pgQuotedString
   , pgDollarQuotedString
+  , pgString
   , pgNormalIdentifier
   , pgIdentifier
-  , pgString
+  , pgQualifiedIdentifier
   , pgLineComment
   , pgBlockComment
   , pgComment

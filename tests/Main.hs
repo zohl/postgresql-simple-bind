@@ -4,6 +4,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecordWildCards #-}
 
 import Data.Char (chr, isNumber)
 import Data.List (isInfixOf, isSuffixOf)
@@ -140,6 +141,18 @@ instance PGSql TestPGIdentifier where
   render (TestPGIdentifier s) = s
 
 
+data TestPGQualifiedIdentifier = TestPGQualifiedIdentifier PGIdentifier deriving (Show)
+
+instance Arbitrary TestPGQualifiedIdentifier where
+  arbitrary = do
+    pgiSchema <- oneof [return Nothing, Just . render <$> (arbitrary :: Gen TestPGIdentifier)]
+    pgiName   <- render <$> (arbitrary :: Gen TestPGIdentifier)
+    return $ TestPGQualifiedIdentifier PGIdentifier {..}
+
+instance PGSql TestPGQualifiedIdentifier where
+  render (TestPGQualifiedIdentifier PGIdentifier {..}) = maybe pgiName (++ ('.':pgiName)) pgiSchema
+
+
 data TestPGLineComment = TestPGLineComment String deriving (Show)
 
 instance Arbitrary TestPGLineComment where
@@ -268,6 +281,10 @@ spec = do
 
   describe "pgIdentifier" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGIdentifier) pgIdentifier)
+    prop' "parsing works" $ flip shouldSatisfy $ const True
+
+  describe "pgQualifiedIdentifier" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGQualifiedIdentifier) pgQualifiedIdentifier)
     prop' "parsing works" $ flip shouldSatisfy $ const True
 
   describe "pgLineComment" $ do
