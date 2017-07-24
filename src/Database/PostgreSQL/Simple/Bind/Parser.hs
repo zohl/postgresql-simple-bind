@@ -28,17 +28,24 @@
 
 module Database.PostgreSQL.Simple.Bind.Parser (
     parsePGFunction
+
   , pgTag
   , pgQuotedString
   , pgDollarQuotedString
   , pgString
+
   , pgNormalIdentifier
   , pgIdentifier
   , pgQualifiedIdentifier
+
   , pgLineComment
   , pgBlockComment
   , pgComment
+
+  , pgColumnType
+  , pgExactType
   , pgType
+
   , pgResult
   , pgColumn
   , pgArgument
@@ -98,23 +105,11 @@ asciiCIs []     = return ()
 asciiCIs (w:ws) = asciiCI w *> ss *> asciiCIs ws
 
 
--- | Parser for a line comment.
-pgLineComment :: Parser Text
-pgLineComment = (liftA2 (<>) (string "--") (takeWhile (not . isEndOfLine))) <* (endOfLine <|> pure ())
-
--- | Parser for a block comment.
-pgBlockComment :: Parser Text
-pgBlockComment = liftA2 (<>) (string "/*") pgBlockCommentTail where
-  pgBlockCommentTail = do
-    s <- takeWhile (\c -> (c /= '/') && (c /= '*'))
-    fmap (s <>) $ foldl1 (<|>) [
-        (liftA2 (<>) pgBlockComment pgBlockCommentTail)
-      , (string "*/")
-      , (T.cons <$> anyChar <*> pgBlockCommentTail)]
-
--- | Parser for a comment.
-pgComment :: Parser Text
-pgComment = pgLineComment <|> pgBlockComment
+-- | Parser for a tag of dollar-quoted string literal.
+pgTag :: Parser Text
+pgTag = pgNonEmptyTag <|> (pure "") where
+  pgNonEmptyTag :: Parser Text
+  pgNonEmptyTag = liftA2 T.cons (satisfy $ inClass "a-zA-Z_") (takeWhile $ inClass "a-zA-Z0-9_")
 
 
 -- | Parser for a string surrounded by "'" or "\"".
@@ -131,6 +126,7 @@ pgQuotedString q = do
                then liftA2 (<>) (return s) (anyChar *> pgQuotedString q)
                else return s
 
+
 -- | Parser for a dollar-quoted string.
 pgDollarQuotedString :: Text -> Parser Text
 pgDollarQuotedString q = do
@@ -141,12 +137,6 @@ pgDollarQuotedString q = do
     then return (s <> t)
     else fmap ((T.snoc s '$') <>) (pgDollarQuotedString q)
 
-
--- | Parser for a tag of dollar-quoted string literal.
-pgTag :: Parser Text
-pgTag = pgNonEmptyTag <|> (pure "") where
-  pgNonEmptyTag :: Parser Text
-  pgNonEmptyTag = liftA2 T.cons (satisfy $ inClass "a-zA-Z_") (takeWhile $ inClass "a-zA-Z0-9_")
 
 -- | Parser for a string.
 pgString :: Parser Text
@@ -169,35 +159,55 @@ pgNormalIdentifier = T.toLower <$> liftA2 T.cons
 pgIdentifier :: Parser Text
 pgIdentifier = ((char '"') *> (pgQuotedString '"')) <|> pgNormalIdentifier where
 
+
 -- | Parser combinator to retrieve additionally a qualification.
 qualified :: Parser a -> Parser (Text, a)
 qualified = liftA2 (,) (pgIdentifier <* char '.')
 
+
 -- | Parser combinator to retrieve additionally a qualification (if exist).
 optionallyQualified :: Parser a -> Parser (Maybe Text, a)
 optionallyQualified p = ((first Just) <$> qualified p) <|> ((Nothing,) <$> p)
+
 
 -- | Parser for an (optionally) qualified identifier.
 pgQualifiedIdentifier :: Parser PGIdentifier
 pgQualifiedIdentifier = uncurry PGIdentifier . (fmap T.unpack *** T.unpack) <$> optionallyQualified pgIdentifier
 
 
--- | Parser for a type.
-pgType :: Parser PGType
-pgType = restructure
-       . first (fmap T.unpack)
-       . second (T.unpack *** fmap T.unpack)
-       <$> (optionallyQualified pgColumnType <|> optionallyQualified pgExactType) where
+-- | Parser for a line comment.
+pgLineComment :: Parser Text
+pgLineComment = (liftA2 (<>) (string "--") (takeWhile (not . isEndOfLine))) <* (endOfLine <|> pure ())
 
-  pgColumnType :: Parser (Text, Maybe Text)
-  pgColumnType = ((,Nothing) . uncurry (<>) . ((<> ".") *** (<> "%type")))
-             <$> (qualified pgIdentifier <* asciiCI "%type")
 
-  pgExactType :: Parser (Text, Maybe Text)
-  pgExactType = do
-    (typeName, typeModifiers) <-pgTime <|> (liftA2 (,) pgTypeName (ss *> pgTypeModifier))
-    dimensions <- pgDimensions
-    return (typeName <> dimensions, typeModifiers)
+-- | Parser for a block comment.
+pgBlockComment :: Parser Text
+pgBlockComment = liftA2 (<>) (string "/*") pgBlockCommentTail where
+  pgBlockCommentTail = do
+    s <- takeWhile (\c -> (c /= '/') && (c /= '*'))
+    fmap (s <>) $ foldl1 (<|>) [
+        (liftA2 (<>) pgBlockComment pgBlockCommentTail)
+      , (string "*/")
+      , (T.cons <$> anyChar <*> pgBlockCommentTail)]
+
+
+-- | Parser for a comment.
+pgComment :: Parser Text
+pgComment = pgLineComment <|> pgBlockComment
+
+
+-- | Parser for a column type.
+pgColumnType :: Parser (Text, Maybe Text)
+pgColumnType = ((,Nothing) . uncurry (<>) . ((<> ".") *** (<> "%type")))
+           <$> (qualified pgIdentifier <* asciiCI "%type")
+
+
+-- | Parser for an exact type.
+pgExactType :: Parser (Text, Maybe Text)
+pgExactType = do
+  (typeName, typeModifiers) <-pgTime <|> (liftA2 (,) pgTypeName (ss *> pgTypeModifier))
+  dimensions <- pgDimensions
+  return (typeName <> dimensions, typeModifiers) where
 
   pgTypeName :: Parser Text
   pgTypeName = pgInterval
@@ -251,8 +261,17 @@ pgType = restructure
       dimension :: Parser (Maybe Int)
       dimension = (char '[') *> ((Just <$> decimal) <|> pure Nothing) <* (char ']')
 
+
+-- | Parser for a type.
+pgType :: Parser PGType
+pgType = restructure
+       . first (fmap T.unpack)
+       . second (T.unpack *** fmap T.unpack)
+       <$> (optionallyQualified pgColumnType <|> optionallyQualified pgExactType) where
+
   restructure :: (Maybe String, (String, Maybe String)) -> PGType
   restructure (pgiSchema, (pgiName, pgtModifiers)) = let pgtIdentifier = PGIdentifier {..} in PGType {..}
+
 
 -- | Parser for column definition in RETURNS TABLE clause.
 pgColumn :: Parser PGColumn
