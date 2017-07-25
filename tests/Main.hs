@@ -209,6 +209,18 @@ instance PGSql TestPGComment where
   render (TestPGComment s) = s
 
 
+data TestPGColumnType = TestPGColumnType String deriving (Show)
+
+instance Arbitrary TestPGColumnType where
+  arbitrary = TestPGColumnType <$> do
+    tableName  <- render <$> (arbitrary :: Gen TestPGIdentifier)
+    columnName <- render <$> (arbitrary :: Gen TestPGIdentifier)
+    return $ concat [tableName, ".", columnName, "%type"]
+
+instance PGSql TestPGColumnType where
+  render (TestPGColumnType s) = s
+
+
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
@@ -298,6 +310,10 @@ spec = do
 
   describe "pgComment" $ do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGComment) pgComment)
+    prop' "parsing works" . flip shouldSatisfy $ const True
+
+  describe "pgColumnType" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGColumnType) pgColumnType)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
 
