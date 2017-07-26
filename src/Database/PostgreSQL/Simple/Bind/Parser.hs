@@ -61,7 +61,7 @@ import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
 import Control.Arrow ((&&&), (***), first, second)
 import Control.Monad (when, void, liftM2)
 import Control.Monad.Catch (MonadThrow(..), throwM)
-import Data.Maybe (listToMaybe, catMaybes)
+import Data.Maybe (listToMaybe, catMaybes, fromMaybe)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
@@ -100,9 +100,11 @@ data ParserException
 ss :: Parser ()
 ss = skipSpace
 
-asciiCIs :: [Text] -> Parser ()
-asciiCIs []     = return ()
-asciiCIs (w:ws) = asciiCI w *> ss *> asciiCIs ws
+asciiCIs :: [Text] -> Parser Text
+asciiCIs = fmap (T.intercalate " ") . asciiCIs' where
+  asciiCIs' :: [Text] -> Parser [Text]
+  asciiCIs' [] = pure []
+  asciiCIs' ws = (uncurry (liftA2 (:))) . ((( <* ss) . asciiCI . head) &&& (asciiCIs' . tail)) $ ws
 
 
 -- | Parser for a tag of dollar-quoted string literal.
@@ -205,61 +207,58 @@ pgColumnType = ((,Nothing) . uncurry (<>) . ((<> ".") *** (<> "%type")))
 -- | Parser for an exact type.
 pgExactType :: Parser (Text, Maybe Text)
 pgExactType = do
-  (typeName, typeModifiers) <-pgTime <|> (liftA2 (,) pgTypeName (ss *> pgTypeModifier))
-  dimensions <- pgDimensions
-  return (typeName <> dimensions, typeModifiers) where
+  name       <- ss *> pgTypeName
+  modifier   <- ss *> pgTypeModifier
+  timeZone   <- if ((T.toLower name) `elem` ["time", "timestamp"])
+                  then ss *> pgTimeZone
+                  else pure Nothing
+  dimensions <- ss *> pgDimensions
 
-  pgTypeName :: Parser Text
-  pgTypeName = pgInterval
-           <|> asciiCI "double precision"
-           <|> asciiCI "bit varying"
-           <|> asciiCI "character varying"
-           <|> pgIdentifier
+  return $ (
+      T.concat [name, fromMaybe T.empty (T.cons ' ' <$> timeZone), dimensions]
+    , modifier
+    ) where
+    pgTypeName :: Parser Text
+    pgTypeName = foldr1 (<|>) ((map asciiCIs multiWordIdentifiers) ++ [pgIdentifier])
 
-  pgTypeModifier :: Parser (Maybe Text)
-  pgTypeModifier = ((char '(') *> (Just <$> pgTypeModifier') <* (char ')'))
-               <|> pure Nothing where
-    pgTypeModifier' = pgString <|> takeWhile1 (/= ')')
+    multiWordIdentifiers :: [[Text]]
+    multiWordIdentifiers = [
+        ["double", "precision"]
+      , ["bit", "varying"]
+      , ["character", "varying"]
+      ] ++ (map ("interval":) [
+        ["year", "to", "month"]
+      , ["day", "to", "hour"]
+      , ["day", "to", "minute"]
+      , ["day", "to", "second"]
+      , ["hour", "to", "minute"]
+      , ["hour", "to", "second"]
+      , ["minute", "to", "second"]
+      , ["year"]
+      , ["month"]
+      , ["day"]
+      , ["hour"]
+      , ["minute"]
+      , ["second"]])
 
+    pgTypeModifier :: Parser (Maybe Text)
+    pgTypeModifier = ((char '(') *> (Just <$> pgTypeModifier') <* (char ')'))
+                 <|> pure Nothing where
+      pgTypeModifier' = pgString <|> takeWhile1 (/= ')')
 
-  pgInterval :: Parser Text
-  pgInterval = liftA2 (*<>) (asciiCI "interval" <* ss) (
-        asciiCI "year to month"
-    <|> asciiCI "day to hour"
-    <|> asciiCI "day to minute"
-    <|> asciiCI "day to second"
-    <|> asciiCI "hour to minute"
-    <|> asciiCI "hour to second"
-    <|> asciiCI "minute to second"
-    <|> asciiCI "year"
-    <|> asciiCI "month"
-    <|> asciiCI "day"
-    <|> asciiCI "hour"
-    <|> asciiCI "minute"
-    <|> asciiCI "second"
-    <|> asciiCI "")
+    pgTimeZone :: Parser (Maybe Text)
+    pgTimeZone = (Just <$> asciiCIs ["with", "time", "zone"])
+             <|> (Just <$> asciiCIs ["without", "time", "zone"])
+             <|> pure Nothing
 
-  pgTime :: Parser (Text, Maybe Text)
-  pgTime = do
-    (base, modifier, zone) <- (,,)
-      <$> (asciiCI "timestamptz"
-       <|> asciiCI "timestamp"
-       <|> asciiCI "timetz"
-       <|> asciiCI "time")
-      <*> (ss *> pgTypeModifier)
-      <*> (ss *> (asciiCI "with time zone" <|> asciiCI "without time zone" <|> string ""))
-    pure (base *<> zone, modifier)
-
-  (*<>) l r = if T.null r then l else l <> T.singleton ' ' <> r
-
-  pgDimensions :: Parser Text
-  pgDimensions = fmap ((flip T.replicate) "[]") $
-        (asciiCI "array" *> ss *> (dimension *> (pure 1) <|> (pure 1)))
-    <|> (fmap P.length $ many (ss *> dimension))
-    <|> (pure 0)
-    where
-      dimension :: Parser (Maybe Int)
-      dimension = (char '[') *> ((Just <$> decimal) <|> pure Nothing) <* (char ']')
+    pgDimensions :: Parser Text
+    pgDimensions = fmap ((flip T.replicate) "[]") $
+          (asciiCI "array" *> ss *> (dimension *> (pure 1) <|> (pure 1)))
+      <|> (fmap P.length $ many (ss *> dimension))
+      <|> (pure 0)
+      where
+        dimension :: Parser (Maybe Int)
+        dimension = (char '[') *> ((Just <$> decimal) <|> pure Nothing) <* (char ']')
 
 
 -- | Parser for a type.
@@ -397,8 +396,8 @@ pgFunctionProperty =
     window         = asciiCI "window"
     behaviour      = asciiCI "immutable" <|> asciiCI "stable" <|> asciiCI "volatile"
     leakproof      = ((asciiCI "not" *> ss *> pure ()) <|> pure ()) *> asciiCI "leakproof"
-    strictness     = asciiCIs ["called", "on", "null", "input"]
-                 <|> asciiCIs ["returns", "null", "on", "null", "input"]
+    strictness     = asciiCIs ["called", "on", "null", "input"] *> pure ()
+                 <|> asciiCIs ["returns", "null", "on", "null", "input"] *> pure ()
                  <|> asciiCI "strict" *> pure ()
     security       = ((asciiCI "external" *> ss *> pure ()) <|> pure ())
                   *> asciiCI "security" *> ss *> (asciiCI "invoker" <|> asciiCI "definer")
@@ -413,7 +412,7 @@ pgFunctionObsoleteProperty = (asciiCI "isStrict" <|> asciiCI "isCachable") *> pu
 -- | Parser for a function.
 pgFunction :: Parser PGFunction
 pgFunction = do
-  _            <- asciiCIs ["create", "function"] <|> asciiCIs ["create", "or", "replace", "function"]
+  _             <- asciiCIs ["create", "function"] <|> asciiCIs ["create", "or", "replace", "function"]
   pgfIdentifier <- ss *> pgQualifiedIdentifier
 
   (pgfArguments, pgfResult) <- liftM2 (,)
