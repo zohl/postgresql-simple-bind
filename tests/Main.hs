@@ -289,10 +289,21 @@ instance Arbitrary TestPGExactType where
     , (m /= m' || t /= t' || d /= d')] where
        shrinkString s = if (null s) then [s] else ["", s]
 
-
 instance PGSql TestPGExactType where
   render (TestPGExactType name modifier timeZone dimensions) = intercalate " " . filter (not . null) $
     [name, modifier, timeZone, dimensions]
+
+
+data TestPGType = TestPGType String deriving (Show)
+
+instance Arbitrary TestPGType where
+  arbitrary = TestPGType <$> oneof [
+      render <$> (arbitrary :: Gen TestPGColumnType)
+    , render <$> (arbitrary :: Gen TestPGExactType)]
+
+instance PGSql TestPGType where
+  render (TestPGType s) = s
+
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
@@ -393,77 +404,10 @@ spec = do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGExactType) pgExactType)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
-
   describe "pgType" $ do
-    let test t = testParser pgType t . Right
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGType) pgType)
+    prop' "parsing works" . flip shouldSatisfy $ const True
 
-    it "works with simple type names" $ do
-      test "varchar"   "varchar"
-      test "bigint"    "bigint"
-      test "timestamp" "timestamp"
-
-    it "works with multiword type names" $ do
-      test "double precision"         "double precision"
-      test "character varying"        "character varying"
-      test "timestamp with time zone" "timestamp with time zone"
-
-    it "works with types with modifiers" $ do
-      test "varchar(256)"               "varchar"           {pgtModifiers = Just "256"}
-      test "numeric(10)"                "numeric"           {pgtModifiers = Just "10"}
-      test "numeric(10,3)"              "numeric"           {pgtModifiers = Just "10,3"}
-      test "character varying(1024)"    "character varying" {pgtModifiers = Just "1024"}
-      test "t_type('foo)(bar')"         "t_type"            {pgtModifiers = Just "'foo)(bar'"}
-      test "t_type(\"foo)(bar\")"       "t_type"            {pgtModifiers = Just "\"foo)(bar\""}
-      test "t_type($$foo)(bar$$)"       "t_type"            {pgtModifiers = Just "$$foo)(bar$$"}
-      test "t_type($baz$foo)(bar$baz$)" "t_type"            {pgtModifiers = Just "$baz$foo)(bar$baz$"}
-
-    it "works with time types" $ do
-      test "time"                     "time"
-      test "time (6)"                 "time"                    {pgtModifiers = Just "6"}
-      test "time (6) with time zone"  "time with time zone"     {pgtModifiers = Just "6"}
-      test "time with time zone"      "time with time zone"
-      test "time without time zone"   "time without time zone"
-      test "timestamp with time zone" "timestamp with time zone"
-      test "timestamptz"              "timestamptz"
-
-    it "works with intervals" $ do
-      test "interval"                       "interval"
-      test "interval month"                 "interval month"
-      test "interval minute to second (4)"  "interval minute to second" {pgtModifiers = Just "4"}
-
-    it "works with arrays" $ do
-      test "varchar []"        "varchar[]"
-      test "varchar [10]"      "varchar[]"
-      test "varchar [4][4]"    "varchar[][]"
-      test "varchar array"     "varchar[]"
-      test "varchar array [2]" "varchar[]"
-      test "varchar(16)[2]"    "varchar[]" {pgtModifiers = Just "16"}
-
-    it "works with quoted type names" $ do
-      test "\"varchar\""        "\"varchar\""
-      test "\"varchar\"(16)"    "\"varchar\""   {pgtModifiers = Just "16"}
-      test "\"varchar\"(16)[2]" "\"varchar\"[]" {pgtModifiers = Just "16"}
-
-    it "works with column-type expressions" $ do
-      test "country.code%type"          "country.code%type"
-      test "\"country\".\"code\"%type"  "\"country\".\"code\"%type"
-
-    it "works with user-defined types" $ do
-      test "t_custom_type"           "t_custom_type"
-      test "t_custom_type (1,2,3,4)" "t_custom_type" {pgtModifiers = Just "1,2,3,4"}
-
-    it "works schema-qualified types" $ do
-      test "public.t_custom_type" PGType {
-          pgtIdentifier = "t_custom_type" {pgiSchema = Just "public"}
-        , pgtModifiers = Nothing}
-
-      test "public.t_custom_type(8)[3][3]" PGType {
-          pgtIdentifier = "t_custom_type[][]" {pgiSchema = Just "public"}
-        , pgtModifiers = Just "8"}
-
-      test "public.country.code%type" PGType {
-          pgtIdentifier = "country.code%type" {pgiSchema = Just "public"}
-        , pgtModifiers = Nothing}
 
   describe "pgColumn" $ do
     let test t = testParser pgColumn t . Right
