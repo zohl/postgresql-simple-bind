@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 
+import Control.Arrow (second)
 import Data.Char (chr, isNumber, toLower)
 import Data.List (isInfixOf, isSuffixOf, intercalate)
 import Data.Maybe (listToMaybe, fromMaybe)
@@ -21,7 +22,7 @@ import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumen
 import Text.Heredoc (str)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency, arbitrarySizedNatural, listOf, elements)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements)
 import qualified Data.Text as T
 import qualified Data.Bifunctor as B(first)
 
@@ -305,6 +306,26 @@ instance PGSql TestPGType where
   render (TestPGType s) = s
 
 
+data TestPGResult
+  = TestPGResultSingle String
+  | TestPGResultSetOf String
+  | TestPGResultTable [(String, String)]
+    deriving (Show)
+
+instance Arbitrary TestPGResult where
+  arbitrary = oneof [arbitraryResultSingle, arbitraryResultSetOf, arbitraryResultTable] where
+    arbitraryResultSingle = TestPGResultSingle . render <$> (arbitrary :: Gen TestPGType)
+    arbitraryResultSetOf = TestPGResultSetOf . render <$> (arbitrary :: Gen TestPGType)
+    arbitraryResultTable = TestPGResultTable <$> listOf1 (liftM2 (,)
+      (render <$> (arbitrary :: Gen TestPGIdentifier))
+      (render <$> (arbitrary :: Gen TestPGType)))
+
+instance PGSql TestPGResult where
+  render (TestPGResultSingle s) = s
+  render (TestPGResultSetOf s) = "setof " ++ s
+  render (TestPGResultTable cs) = "table (" ++ (intercalate ", " . map (uncurry (++) . second (' ':)) $ cs) ++ ")"
+
+
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
@@ -408,6 +429,11 @@ spec = do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGType) pgType)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
+  describe "pgResult" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGResult) pgResult)
+    prop' "parsing works" . flip shouldSatisfy $ const True
+
+
 
   describe "pgColumn" $ do
     let test t = testParser pgColumn t . Right
@@ -415,24 +441,6 @@ spec = do
       test "foo varchar"       PGColumn {pgcName = "foo", pgcType = "varchar"}
       test "foo varchar(16)"   PGColumn {pgcName = "foo", pgcType = "varchar" {pgtModifiers = Just "16"}}
       test "foo varchar(16)[]" PGColumn {pgcName = "foo", pgcType = "varchar[]" {pgtModifiers = Just "16"}}
-
-
-  describe "pgResult" $ do
-    let test t = testParser pgResult t . Right
-
-    it "works with simple types" $ do
-      test "bigint" $ PGSingle ["bigint"]
-      test "varchar" $ PGSingle ["varchar"]
-
-    it "works with SETOF" $ do
-      test "setof bigint" $ PGSetOf ["bigint"]
-      test "SETOF bigint" $ PGSetOf ["bigint"]
-
-    it "works with TABLE" $ do
-      test "table (x bigint, y varchar)" $ PGTable [
-          PGColumn {pgcName = "x", pgcType = "bigint"}
-        , PGColumn {pgcName = "y", pgcType = "varchar"}]
-
 
   describe "pgArgument" $ do
     let test t = testParser pgArgument t . Right
