@@ -9,7 +9,7 @@
 import Control.Arrow (second)
 import Data.Char (chr, isNumber, toLower)
 import Data.List (isInfixOf, isSuffixOf, intercalate)
-import Data.Maybe (listToMaybe, fromMaybe)
+import Data.Maybe (listToMaybe, fromMaybe, catMaybes)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
 import Data.Either (isRight)
@@ -326,6 +326,34 @@ instance PGSql TestPGResult where
   render (TestPGResultTable cs) = "table (" ++ (intercalate ", " . map (uncurry (++) . second (' ':)) $ cs) ++ ")"
 
 
+instance Arbitrary PGArgumentMode where
+  arbitrary = elements [In, Out, InOut, Variadic]
+
+data TestPGArgument = TestPGArgument {
+    tpgaMode            :: Maybe PGArgumentMode
+  , tpgaName            :: Maybe TestPGIdentifier
+  , tpgaType            :: TestPGType
+  , tpgaDefaultNotation :: String
+  , tpgaDefaultValue    :: Maybe String
+  } deriving (Show)
+
+instance Arbitrary TestPGArgument where
+  arbitrary = do
+    tpgaMode            <- arbitrary
+    tpgaName            <- arbitrary
+    tpgaType            <- arbitrary
+    tpgaDefaultNotation <- elements ["=", "default"]
+    tpgaDefaultValue    <- elements [Nothing, Just "expression"] -- TODO
+    return TestPGArgument {..}
+
+instance PGSql TestPGArgument where
+  render (TestPGArgument {..}) = concat . catMaybes $ [
+      ((++ " ") . show) <$> tpgaMode
+    , (++ " ") . render <$> tpgaName
+    , Just . render $ tpgaType
+    , (' ':)  . (tpgaDefaultNotation ++) . (' ':) <$> tpgaDefaultValue]
+
+
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
@@ -433,6 +461,10 @@ spec = do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGResult) pgResult)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
+  describe "pgArgument" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGArgument) pgArgument)
+    prop' "parsing works" . flip shouldSatisfy $ const True
+
 
 
   describe "pgColumn" $ do
@@ -442,36 +474,6 @@ spec = do
       test "foo varchar(16)"   PGColumn {pgcName = "foo", pgcType = "varchar" {pgtModifiers = Just "16"}}
       test "foo varchar(16)[]" PGColumn {pgcName = "foo", pgcType = "varchar[]" {pgtModifiers = Just "16"}}
 
-  describe "pgArgument" $ do
-    let test t = testParser pgArgument t . Right
-    it "works with simple arguments" $ do
-      test "x bigint"  $ PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint",  pgaOptional = False }
-      test "y varchar" $ PGArgument { pgaMode = def, pgaName = Just "y", pgaType = "varchar", pgaOptional = False }
-      test "Z VARCHAR" $ PGArgument { pgaMode = def, pgaName = Just "z", pgaType = "varchar", pgaOptional = False }
-
-    it "works with argument modes" $ do
-      let r = PGArgument { pgaMode = def, pgaName = Just "x", pgaType = "bigint",  pgaOptional = False }
-      test "in x bigint"       $ r {pgaMode = In}
-      test "out x bigint"      $ r {pgaMode = Out}
-      test "inout x bigint"    $ r {pgaMode = InOut}
-      test "variadic x bigint" $ r {pgaMode = Variadic}
-
-    it "works with positional arguments" $ do
-      let r = PGArgument { pgaMode = def, pgaName = Nothing, pgaType = "",  pgaOptional = False }
-      test "bigint"                            $ r {pgaType = "bigint"}
-      test "out varchar"                       $ r {pgaMode = Out, pgaType = "varchar"}
-      test "variadic timestamp with time zone" $ r {pgaMode = Variadic, pgaType = "timestamp with time zone"}
-
-    it "works with different combinations of optional elements" $ do
-      let r = PGArgument { pgaMode = def, pgaName = Nothing, pgaType = "timestamp with time zone", pgaOptional = False }
-      test "inout foo timestamp with time zone default current_timestamp" r {pgaMode = InOut, pgaName = Just "foo", pgaOptional = True}
-      test "inout foo timestamp with time zone"                           r {pgaMode = InOut, pgaName = Just "foo"}
-      test "inout     timestamp with time zone default current_timestamp" r {pgaMode = InOut, pgaOptional = True}
-      test "inout     timestamp with time zone"                           r {pgaMode = InOut}
-      test "      foo timestamp with time zone default current_timestamp" r {pgaName = Just "foo", pgaOptional = True}
-      test "      foo timestamp with time zone"                           r {pgaName = Just "foo"}
-      test "          timestamp with time zone default current_timestamp" r {pgaOptional = True}
-      test "          timestamp with time zone"                           r
 
 
   describe "pgArguments" $ do
