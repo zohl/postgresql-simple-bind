@@ -467,25 +467,16 @@ spec = do
 
 
 
-  describe "pgColumn" $ do
-    let test t = testParser pgColumn t . Right
-    it "just works" $ do
-      test "foo varchar"       PGColumn {pgcName = "foo", pgcType = "varchar"}
-      test "foo varchar(16)"   PGColumn {pgcName = "foo", pgcType = "varchar" {pgtModifiers = Just "16"}}
-      test "foo varchar(16)[]" PGColumn {pgcName = "foo", pgcType = "varchar[]" {pgtModifiers = Just "16"}}
-
-
-
-  describe "pgArguments" $ do
-    let test t = testParser (pgArguments True) t . Right
+  describe "pgArgumentList" $ do
+    let test t = testParser (pgArgumentList True) t . Right
     it "works with mixed arguments" $ do
       test "in p1 bigint default 'test', out p2 varchar" [
           PGArgument { pgaMode = In,  pgaName = Just "p1", pgaType = "bigint",  pgaOptional = True }
         , PGArgument { pgaMode = Out, pgaName = Just "p2", pgaType = "varchar", pgaOptional = False }]
 
 
-  describe "pgArguments (incorrect declarations)" $ do
-    let test t = testParser (pgArguments True) t . Left
+  describe "pgArgumentList (incorrect declarations)" $ do
+    let test t = testParser (pgArgumentList True) t . Left
 
     it "fails when an optional argument is followed by mandatory one" $ do
       test "p1 bigint, p2 varchar default 'foo', p3 varchar"

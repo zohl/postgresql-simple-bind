@@ -47,10 +47,11 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgType
 
   , pgResult
-  , pgColumn
+
+  , pgExpression
   , pgArgument
-  , pgArguments
-  , pgArgumentMode
+  , pgArgumentList
+
   , pgFunction
   , pgDeclarations
   , ParserException(..)
@@ -272,20 +273,23 @@ pgType = restructure
   restructure (pgiSchema, (pgiName, pgtModifiers)) = let pgtIdentifier = PGIdentifier {..} in PGType {..}
 
 
--- | Parser for column definition in RETURNS TABLE clause.
-pgColumn :: Parser PGColumn
-pgColumn = liftA2 PGColumn
-  (T.unpack <$> pgIdentifier)
-  (ss *> pgType)
+-- | Parser for 'pg_get_function_result' output.
+pgResult :: Parser PGResult
+pgResult = ss *> (pgResultSetOf <|> pgResultTable <|> pgResultSingle) where
 
--- | Parser for an argument mode.
-pgArgumentMode :: Parser PGArgumentMode
-pgArgumentMode =
-      (asciiCI "inout"    *> space *> return InOut)
-  <|> (asciiCI "in"       *> space *> return In)
-  <|> (asciiCI "out"      *> space *> return Out)
-  <|> (asciiCI "variadic" *> space *> return Variadic)
-  <|> (return def)
+  pgResultSetOf :: Parser PGResult
+  pgResultSetOf = fmap (PGSetOf . pure) $ asciiCI "setof" *> ss *> pgType
+
+  pgResultTable :: Parser PGResult
+  pgResultTable = fmap PGTable $ asciiCI "table" *> ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')'
+
+  pgColumn :: Parser PGColumn
+  pgColumn = liftA2 PGColumn
+    (T.unpack <$> pgIdentifier)
+    (ss *> pgType)
+
+  pgResultSingle :: Parser PGResult
+  pgResultSingle = fmap (PGSingle . pure) $ pgType
 
 
 -- | Parser for an expression (as a default value for an argument).
@@ -304,23 +308,33 @@ pgArgument = do
     <|> (,,) <$> (return Nothing)       <*> (ss *> pgType) <*> (ss *> pgOptional)
   return PGArgument {..} where
 
+    pgArgumentMode :: Parser PGArgumentMode
+    pgArgumentMode =
+          (asciiCI "inout"    *> space *> return InOut)
+      <|> (asciiCI "in"       *> space *> return In)
+      <|> (asciiCI "out"      *> space *> return Out)
+      <|> (asciiCI "variadic" *> space *> return Variadic)
+      <|> (return def)
+
+    pgArgumentName :: Parser (Maybe String)
     pgArgumentName = fmap (Just . T.unpack) $ ss *> pgIdentifier
 
+    pgOptional :: Parser Bool
     pgOptional = ss *> (
           ((asciiCI "default" <|> string "=") *> ((not . T.null) <$> pgExpression))
       <|> (peekChar >>= \mc -> do
               when (maybe False (not . inClass ",)") mc) $ fail "TODO"
               return False))
 
+
 -- | Parser for an argument list as in 'pg_catalog.pg_get_function_result'.
-pgArguments :: Bool -> Parser [PGArgument]
-pgArguments doCheck = do
+pgArgumentList :: Bool -> Parser [PGArgument]
+pgArgumentList doCheck = do
   args <- ((ss *> pgArgument <* ss) `sepBy` (char ','))
   when (doCheck) $ void . sequence $ map ($ args) [
       checkExpectedDefaults
     , checkNotExpectedDefaults
-    , checkVariadic
-    ]
+    , checkVariadic]
 
   return args where
 
@@ -343,13 +357,6 @@ pgArguments doCheck = do
      (fail . show . NonOutVariableAfterVariadic)
      . listToMaybe . filter ((/= Out) . pgaMode) . tailSafe . snd . break ((== Variadic) . pgaMode)
 
-
--- | Parser for 'pg_get_function_result' output.
-pgResult :: Parser PGResult
-pgResult = ss *> (pgResultSetOf <|> pgResultTable <|> pgResultSingle) where
-  pgResultSetOf = fmap (PGSetOf . pure) $ asciiCI "setof" *> ss *> pgType
-  pgResultTable = fmap PGTable $ asciiCI "table" *> ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')'
-  pgResultSingle = fmap (PGSingle . pure) $ pgType
 
 -- | Move 'Out' arguments to PGResult record.
 normalizeFunction :: [PGArgument] -> Maybe PGResult -> Parser ([PGArgument], PGResult)
@@ -416,7 +423,7 @@ pgFunction = do
   pgfIdentifier <- ss *> pgQualifiedIdentifier
 
   (pgfArguments, pgfResult) <- liftM2 (,)
-    (ss *> char '(' *> pgArguments True  <* char ')')
+    (ss *> char '(' *> pgArgumentList True  <* char ')')
     (ss *> (asciiCI "returns" *> ss *> (Just <$> pgResult)) <|> (return Nothing))
     >>= uncurry normalizeFunction
 

@@ -45,7 +45,7 @@ import Database.PostgreSQL.Simple (Connection, query)
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindOptions(..), PostgresBindException(..))
 import Database.PostgreSQL.Simple.Bind.Implementation (bindFunction)
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGIdentifier(..))
-import Database.PostgreSQL.Simple.Bind.Parser (pgDeclarations, pgArguments, pgResult)
+import Database.PostgreSQL.Simple.Bind.Parser (pgDeclarations, pgArgumentList, pgResult)
 import Language.Haskell.TH.Syntax (Q, Dec, addDependentFile, runIO)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath.Posix ((</>))
@@ -106,7 +106,7 @@ bindFunctionsFromDB opt conn pgfIdentifier@(PGIdentifier {..})
   = (runIO fetchFunction) >>= fmap concat . mapM (bindFunction opt) where
 
     fetchFunction = (query conn sql' (pgiSchema, pgiName))
-                >>= mapM (uncurry (liftM2 (,)) . (parse (pgArguments False) *** parse pgResult))
+                >>= mapM (uncurry (liftM2 (,)) . (parse (pgArgumentList False) *** parse pgResult))
                 >>= mapM (\(pgfArguments, pgfResult) -> return PGFunction {..})
 
     sql' = [sql|
