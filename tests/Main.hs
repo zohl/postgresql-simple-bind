@@ -8,7 +8,7 @@
 
 import Control.Arrow (second)
 import Data.Char (chr, isNumber, toLower)
-import Data.List (isInfixOf, isSuffixOf, intercalate)
+import Data.List (isInfixOf, isSuffixOf, intercalate, tails)
 import Data.Maybe (listToMaybe, fromMaybe, catMaybes)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
@@ -354,6 +354,17 @@ instance PGSql TestPGArgument where
     , (' ':)  . (tpgaDefaultNotation ++) . (' ':) <$> tpgaDefaultValue]
 
 
+data TestPGArgumentList = TestPGArgumentList [TestPGArgument] deriving (Show)
+
+instance Arbitrary TestPGArgumentList where
+  arbitrary = TestPGArgumentList <$> listOf arbitrary
+
+  shrink (TestPGArgumentList xs) = map TestPGArgumentList (tail . tails $ xs)
+
+instance PGSql TestPGArgumentList where
+  render (TestPGArgumentList xs) = intercalate ", " . map render $ xs
+
+
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
@@ -465,6 +476,9 @@ spec = do
     let prop' = propParser (tagWith (Proxy :: Proxy TestPGArgument) pgArgument)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
+  describe "pgArgumentList" $ do
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGArgumentList) (pgArgumentList True))
+    prop' "parsing works" . flip shouldSatisfy $ const True
 
 
   describe "pgArgumentList" $ do
