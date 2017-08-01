@@ -50,6 +50,10 @@ module Database.PostgreSQL.Simple.Bind.Parser (
 
   , pgExpression
   , pgArgument
+
+  , checkExpectedDefaults
+  , checkNotExpectedDefaults
+  , checkVariadic
   , pgArgumentList
 
   , pgFunction
@@ -60,7 +64,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
 
 import Control.Applicative ((*>), (<*), (<|>), liftA2, many)
 import Control.Arrow ((&&&), (***), first, second)
-import Control.Monad (when, void, liftM2)
+import Control.Monad (when, liftM2)
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Data.Maybe (listToMaybe, catMaybes, fromMaybe)
 import Data.Monoid ((<>))
@@ -327,35 +331,61 @@ pgArgument = do
               return False))
 
 
+-- | Checks the following property of an argument list:
+--   all input parameters following a parameter with a default value
+--   must have default values as well.
+checkExpectedDefaults
+  :: (t -> PGArgumentMode)  -- ^ Mode of a parameter.
+  -> (t -> Bool)            -- ^ Is a parameter optional?
+  -> [t]
+  -> Maybe t
+checkExpectedDefaults mode optional
+  = listToMaybe
+  . dropWhile optional
+  . dropWhile (not . optional)
+  . filter ((`elem` [In, InOut]) . mode)
+
+
+-- | Checks the following property of an argument list:
+--   only input parameters can have default values.
+checkNotExpectedDefaults
+  :: (t -> PGArgumentMode)  -- ^ Mode of a parameter.
+  -> (t -> Bool)            -- ^ Is a parameter optional?
+  -> [t]
+  -> Maybe t
+checkNotExpectedDefaults mode optional
+  = listToMaybe
+  . filter optional
+  . filter ((`elem` [Out, Variadic]) . mode)
+
+
+-- | Checks the following property of an argument list:
+--   only OUT parameters can follow VARIADIC one.
+checkVariadic
+  :: (t -> PGArgumentMode)  -- ^ Mode of a parameter.
+  -> (t -> Bool)            -- ^ Is a parameter optional?
+  -> [t]
+  -> Maybe t
+checkVariadic  mode _
+  = listToMaybe
+  . filter ((/= Out) . mode)
+  . tailSafe . snd
+  . break ((== Variadic) . mode)
+
+
 -- | Parser for an argument list as in 'pg_catalog.pg_get_function_result'.
 pgArgumentList :: Bool -> Parser [PGArgument]
 pgArgumentList doCheck = do
   args <- ((ss *> pgArgument <* ss) `sepBy` (char ','))
-  when (doCheck) $ void . sequence $ map ($ args) [
-      checkExpectedDefaults
-    , checkNotExpectedDefaults
-    , checkVariadic]
 
-  return args where
+  when doCheck $ do
+    let check (t, e) = maybe (pure ()) (fail . show . e) (t pgaMode pgaOptional args)
+    mapM_ check [
+        (checkExpectedDefaults,    DefaultValueExpected)
+      , (checkNotExpectedDefaults, DefaultValueNotExpected)
+      , (checkVariadic,            NonOutVariableAfterVariadic)]
 
-    checkExpectedDefaults :: [PGArgument] -> Parser ()
-    checkExpectedDefaults = maybe
-      (return ())
-      (fail . show . DefaultValueExpected)
-      . listToMaybe . dropWhile (pgaOptional) . dropWhile (not . pgaOptional)
-      . filter (\a -> (pgaMode a) `elem` [In, InOut])
-
-    checkNotExpectedDefaults :: [PGArgument] -> Parser ()
-    checkNotExpectedDefaults = maybe
-      (return ())
-      (fail . show . DefaultValueNotExpected)
-      . listToMaybe . filter (\a -> (pgaMode a `elem` [Out, Variadic]) && (pgaOptional a))
-
-    checkVariadic :: [PGArgument] -> Parser ()
-    checkVariadic = maybe
-     (return ())
-     (fail . show . NonOutVariableAfterVariadic)
-     . listToMaybe . filter ((/= Out) . pgaMode) . tailSafe . snd . break ((== Variadic) . pgaMode)
+  return args
 
 
 -- | Move 'Out' arguments to PGResult record.

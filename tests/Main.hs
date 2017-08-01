@@ -357,7 +357,15 @@ instance PGSql TestPGArgument where
 data TestPGArgumentList = TestPGArgumentList [TestPGArgument] deriving (Show)
 
 instance Arbitrary TestPGArgumentList where
-  arbitrary = TestPGArgumentList <$> listOf arbitrary
+  arbitrary = TestPGArgumentList <$> (listOf arbitrary)
+    `suchThat` (wrap checkExpectedDefaults)
+    `suchThat` (wrap checkNotExpectedDefaults)
+    `suchThat` (wrap checkVariadic) where
+    wrap check
+      = maybe True (const False)
+      . check
+          (fromMaybe In . tpgaMode)
+          (maybe False (const True) . tpgaDefaultValue)
 
   shrink (TestPGArgumentList xs) = map TestPGArgumentList (tail . tails $ xs)
 
