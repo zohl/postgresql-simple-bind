@@ -51,6 +51,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgExpression
   , pgArgument
 
+  , ArgumentListChecker
   , checkExpectedDefaults
   , checkNotExpectedDefaults
   , checkVariadic
@@ -330,15 +331,16 @@ pgArgument = do
               when (maybe False (not . inClass ",)") mc) $ fail "TODO"
               return False))
 
+type ArgumentListChecker t
+  =  (t -> PGArgumentMode)  -- ^ Mode of an argument.
+  -> (t -> Bool)            -- ^ Is an argument optional?
+  -> [t]                    -- ^ Argument list.
+  -> Maybe t                -- ^ First argument, that violates the test.
 
 -- | Checks the following property of an argument list:
---   all input parameters following a parameter with a default value
+--   all input arguments following an argument with a default value
 --   must have default values as well.
-checkExpectedDefaults
-  :: (t -> PGArgumentMode)  -- ^ Mode of a parameter.
-  -> (t -> Bool)            -- ^ Is a parameter optional?
-  -> [t]
-  -> Maybe t
+checkExpectedDefaults :: ArgumentListChecker t
 checkExpectedDefaults mode optional
   = listToMaybe
   . dropWhile optional
@@ -347,12 +349,8 @@ checkExpectedDefaults mode optional
 
 
 -- | Checks the following property of an argument list:
---   only input parameters can have default values.
-checkNotExpectedDefaults
-  :: (t -> PGArgumentMode)  -- ^ Mode of a parameter.
-  -> (t -> Bool)            -- ^ Is a parameter optional?
-  -> [t]
-  -> Maybe t
+--   only input arguments can have default values.
+checkNotExpectedDefaults :: ArgumentListChecker t
 checkNotExpectedDefaults mode optional
   = listToMaybe
   . filter optional
@@ -360,12 +358,8 @@ checkNotExpectedDefaults mode optional
 
 
 -- | Checks the following property of an argument list:
---   only OUT parameters can follow VARIADIC one.
-checkVariadic
-  :: (t -> PGArgumentMode)  -- ^ Mode of a parameter.
-  -> (t -> Bool)            -- ^ Is a parameter optional?
-  -> [t]
-  -> Maybe t
+--   only OUT arguments can follow VARIADIC one.
+checkVariadic :: ArgumentListChecker t
 checkVariadic  mode _
   = listToMaybe
   . filter ((/= Out) . mode)

@@ -358,19 +358,30 @@ data TestPGArgumentList = TestPGArgumentList [TestPGArgument] deriving (Show)
 
 instance Arbitrary TestPGArgumentList where
   arbitrary = TestPGArgumentList <$> (listOf arbitrary)
-    `suchThat` (wrap checkExpectedDefaults)
-    `suchThat` (wrap checkNotExpectedDefaults)
-    `suchThat` (wrap checkVariadic) where
-    wrap check
-      = maybe True (const False)
-      . check
-          (fromMaybe In . tpgaMode)
-          (maybe False (const True) . tpgaDefaultValue)
-
   shrink (TestPGArgumentList xs) = map TestPGArgumentList (tail . tails $ xs)
 
 instance PGSql TestPGArgumentList where
   render (TestPGArgumentList xs) = intercalate ", " . map render $ xs
+
+
+wrap :: ArgumentListChecker TestPGArgument -> TestPGArgumentList -> Bool
+wrap check (TestPGArgumentList xs)
+    = maybe True (const False)
+    . check
+        (fromMaybe In . tpgaMode)
+        (maybe False (const True) . tpgaDefaultValue)
+    $ xs
+
+newtype TestPGArgumentListCorrect = TestPGArgumentListCorrect TestPGArgumentList deriving (Show)
+
+instance Arbitrary TestPGArgumentListCorrect where
+  arbitrary = TestPGArgumentListCorrect <$> arbitrary
+    `suchThat` (wrap checkExpectedDefaults)
+    `suchThat` (wrap checkNotExpectedDefaults)
+    `suchThat` (wrap checkVariadic)
+
+instance PGSql TestPGArgumentListCorrect where
+  render (TestPGArgumentListCorrect x) = render x
 
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
@@ -485,7 +496,7 @@ spec = do
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgArgumentList" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGArgumentList) (pgArgumentList True))
+    let prop' = propParser (tagWith (Proxy :: Proxy TestPGArgumentListCorrect) (pgArgumentList True))
     prop' "parsing works" . flip shouldSatisfy $ const True
 
 
