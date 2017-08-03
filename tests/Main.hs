@@ -8,11 +8,11 @@
 
 import Control.Arrow (second)
 import Data.Char (chr, isNumber, toLower)
-import Data.List (isInfixOf, isSuffixOf, intercalate, tails)
+import Data.List (isPrefixOf, isInfixOf, isSuffixOf, intercalate, tails)
 import Data.Maybe (listToMaybe, fromMaybe, catMaybes)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
-import Data.Either (isRight)
+import Data.Either (isLeft, isRight)
 import Control.Monad (liftM2)
 import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
 import Data.Default (def)
@@ -372,33 +372,84 @@ wrap check (TestPGArgumentList xs)
         (maybe False (const True) . tpgaDefaultValue)
     $ xs
 
-newtype TestPGArgumentListCorrect = TestPGArgumentListCorrect TestPGArgumentList deriving (Show)
+newtype TPGALCorrect = TPGALCorrect TestPGArgumentList deriving (Show)
 
-instance Arbitrary TestPGArgumentListCorrect where
-  arbitrary = TestPGArgumentListCorrect <$> arbitrary
+instance Arbitrary TPGALCorrect where
+  arbitrary = TPGALCorrect <$> arbitrary
     `suchThat` (wrap checkExpectedDefaults)
     `suchThat` (wrap checkNotExpectedDefaults)
     `suchThat` (wrap checkVariadic)
 
-instance PGSql TestPGArgumentListCorrect where
-  render (TestPGArgumentListCorrect x) = render x
+instance PGSql TPGALCorrect where
+  render (TPGALCorrect x) = render x
+
+
+newtype TPGALFailedCheckExpectedDefaults = TPGALFailedCheckExpectedDefaults TestPGArgumentList deriving (Show)
+
+instance Arbitrary TPGALFailedCheckExpectedDefaults where
+  arbitrary = TPGALFailedCheckExpectedDefaults <$> arbitrary
+    `suchThat` (not . wrap checkExpectedDefaults)
+    `suchThat` (wrap checkNotExpectedDefaults)
+    `suchThat` (wrap checkVariadic)
+
+instance PGSql TPGALFailedCheckExpectedDefaults where
+  render (TPGALFailedCheckExpectedDefaults x) = render x
+
+
+newtype TPGALFailedCheckNotExpectedDefaults = TPGALFailedCheckNotExpectedDefaults TestPGArgumentList deriving (Show)
+
+instance Arbitrary TPGALFailedCheckNotExpectedDefaults where
+  arbitrary = TPGALFailedCheckNotExpectedDefaults <$> arbitrary
+    `suchThat` (wrap checkExpectedDefaults)
+    `suchThat` (not . wrap checkNotExpectedDefaults)
+    `suchThat` (wrap checkVariadic)
+
+instance PGSql TPGALFailedCheckNotExpectedDefaults where
+  render (TPGALFailedCheckNotExpectedDefaults x) = render x
+
+
+newtype TPGALFailedCheckVariadic = TPGALFailedCheckVariadic TestPGArgumentList deriving (Show)
+
+instance Arbitrary TPGALFailedCheckVariadic where
+  arbitrary = TPGALFailedCheckVariadic <$> arbitrary
+    `suchThat` (wrap checkExpectedDefaults)
+    `suchThat` (wrap checkNotExpectedDefaults)
+    `suchThat` (not . wrap checkVariadic)
+
+instance PGSql TPGALFailedCheckVariadic where
+  render (TPGALFailedCheckVariadic x) = render x
 
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
-  -> (b -> Expectation)
+  -> (Either String b -> Expectation)
   -> Spec
 propParser p name t = prop name property where
-
   property :: a -> Expectation
-  property x = test (parseOnly (unTagged p <* endOfInput) (T.pack . render $ x))
+  property x = t (parseOnly (unTagged p <* endOfInput) (T.pack . render $ x))
 
-  test :: Either String b -> Expectation
-  test result = either
-    (const $ result `shouldSatisfy` isRight)
-    t
-    result
+propParserLeft :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
+  => Tagged a (Parser b)
+  -> String
+  -> (String -> Expectation)
+  -> Spec
+propParserLeft p name t = propParser p name $ \r -> either
+  (t . drop (length prefix))
+  (const $ r `shouldSatisfy` isLeft)
+  r where
+    prefix = either id (const "") $ parseOnly (fail "") ""
+
+propParserRight :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
+  => Tagged a (Parser b)
+  -> String
+  -> (b -> Expectation)
+  -> Spec
+propParserRight p name t = propParser p name $ \r -> either
+  (const $ r `shouldSatisfy` isRight)
+  t
+  r
+
 
 main :: IO ()
 main = hspec spec
@@ -414,12 +465,12 @@ testParser parser text result =
 spec :: Spec
 spec = do
   describe "pgTag" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGTag) pgTag)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGTag) pgTag)
     prop' "the first symbol is not a number" . flip shouldSatisfy $ \s -> T.null s || (not . isNumber . T.head $ s)
 
   describe "pgQuotedString" $ do
     let prop' q = patternMatch (someSymbolVal [q]) where
-          patternMatch (SomeSymbol x) = propParser
+          patternMatch (SomeSymbol x) = propParserRight
             (tagWith (proxyMap (Proxy :: Proxy TestPGQuotedString) x) (pgQuotedString q))
     let qs = ['"', '\'']
     let ps = [
@@ -434,7 +485,7 @@ spec = do
 
   describe "pgDollarQuotedString" $ do
     let prop' tag = patternMatch (someSymbolVal tag) where
-          patternMatch (SomeSymbol x) = propParser
+          patternMatch (SomeSymbol x) = propParserRight
             (tagWith
                (proxyMap (Proxy :: Proxy TestPGDollarQuotedString) x)
                (pgDollarQuotedString $ T.pack ("$"++tag++"$")))
@@ -446,58 +497,68 @@ spec = do
       [(tag, name, test) | tag <- tags, (name, test) <- ps]
 
   describe "pgString" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGString) pgString)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGString) pgString)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgNormalIdentifier" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
     prop' "the first symbol is not '$'" . flip shouldSatisfy $ \s -> (T.head s) /= '$'
     prop' "stored in lowercase" $ \x -> x `shouldBe` (T.toLower x)
 
   describe "pgIdentifier" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGIdentifier) pgIdentifier)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGIdentifier) pgIdentifier)
     prop' "parsing works" $ flip shouldSatisfy $ const True
 
   describe "pgQualifiedIdentifier" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGQualifiedIdentifier) pgQualifiedIdentifier)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGQualifiedIdentifier) pgQualifiedIdentifier)
     prop' "parsing works" $ flip shouldSatisfy $ const True
 
   describe "pgLineComment" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGLineComment) pgLineComment)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGLineComment) pgLineComment)
     prop' "starts with \"--\"" . flip shouldSatisfy $ T.isPrefixOf "--"
 
   describe "pgBlockComment" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGBlockComment) pgBlockComment)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGBlockComment) pgBlockComment)
     prop' "starts with /*" . flip shouldSatisfy $ T.isPrefixOf "/*"
     prop' "ends with */" . flip shouldSatisfy $ T.isSuffixOf "*/"
 
   describe "pgComment" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGComment) pgComment)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGComment) pgComment)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgColumnType" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGColumnType) pgColumnType)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGColumnType) pgColumnType)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgExactType" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGExactType) pgExactType)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGExactType) pgExactType)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgType" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGType) pgType)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGType) pgType)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgResult" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGResult) pgResult)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGResult) pgResult)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgArgument" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGArgument) pgArgument)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGArgument) pgArgument)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgArgumentList" $ do
-    let prop' = propParser (tagWith (Proxy :: Proxy TestPGArgumentListCorrect) (pgArgumentList True))
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TPGALCorrect) (pgArgumentList True))
     prop' "parsing works" . flip shouldSatisfy $ const True
+
+  -- TODO: fix slow generation
+  -- describe "pgArgumentList (incorrect declarations)" $ do
+  --   let prop' e t = propParserLeft (tagWith t (pgArgumentList True))
+  --         ("throws " ++ e)
+  --         . flip shouldSatisfy $ isPrefixOf e
+  --   prop' "DefaultValueExpected"        (Proxy :: Proxy TPGALFailedCheckExpectedDefaults)
+  --   prop' "DefaultValueNotExpected"     (Proxy :: Proxy TPGALFailedCheckNotExpectedDefaults)
+  --   prop' "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
+
 
 
   describe "pgArgumentList" $ do
