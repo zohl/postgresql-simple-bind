@@ -5,11 +5,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
+module Main where
 
 import Control.Arrow (second)
 import Data.Char (chr, isNumber, toLower)
 import Data.List (isPrefixOf, isInfixOf, isSuffixOf, intercalate, tails)
-import Data.Maybe (listToMaybe, fromMaybe, catMaybes)
+import Data.Maybe (listToMaybe, fromMaybe, catMaybes, isJust, isNothing)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
 import Data.Either (isLeft, isRight)
@@ -387,10 +388,18 @@ instance PGSql TPGALCorrect where
 newtype TPGALFailedCheckExpectedDefaults = TPGALFailedCheckExpectedDefaults TestPGArgumentList deriving (Show)
 
 instance Arbitrary TPGALFailedCheckExpectedDefaults where
-  arbitrary = TPGALFailedCheckExpectedDefaults <$> arbitrary
+  arbitrary = TPGALFailedCheckExpectedDefaults <$> arbitraryArgumentList
     `suchThat` (not . wrap checkExpectedDefaults)
     `suchThat` (wrap checkNotExpectedDefaults)
     `suchThat` (wrap checkVariadic)
+    where
+      arbitraryArgumentList = sized $ \n -> fmap (TestPGArgumentList . concat)
+                                          . sequence . map (resize $ max 1 (n `div` 3)) $ [
+          listOf  arbitrary
+        , listOf1 (arbitrary `suchThat` (isJust . tpgaDefaultValue)) `suchThat` (not . empty')
+        , listOf1 (arbitrary `suchThat` (isNothing . tpgaDefaultValue)) `suchThat` (not . empty')]
+
+      empty' = null . filter ((`elem` [In, InOut]) . fromMaybe In  . tpgaMode)
 
 instance PGSql TPGALFailedCheckExpectedDefaults where
   render (TPGALFailedCheckExpectedDefaults x) = render x
@@ -550,45 +559,13 @@ spec = do
     let prop' = propParserRight (tagWith (Proxy :: Proxy TPGALCorrect) (pgArgumentList True))
     prop' "parsing works" . flip shouldSatisfy $ const True
 
-  -- TODO: fix slow generation
-  -- describe "pgArgumentList (incorrect declarations)" $ do
-  --   let prop' e t = propParserLeft (tagWith t (pgArgumentList True))
-  --         ("throws " ++ e)
-  --         . flip shouldSatisfy $ isPrefixOf e
-  --   prop' "DefaultValueExpected"        (Proxy :: Proxy TPGALFailedCheckExpectedDefaults)
-  --   prop' "DefaultValueNotExpected"     (Proxy :: Proxy TPGALFailedCheckNotExpectedDefaults)
-  --   prop' "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
-
-
-
-  describe "pgArgumentList" $ do
-    let test t = testParser (pgArgumentList True) t . Right
-    it "works with mixed arguments" $ do
-      test "in p1 bigint default 'test', out p2 varchar" [
-          PGArgument { pgaMode = In,  pgaName = Just "p1", pgaType = "bigint",  pgaOptional = True }
-        , PGArgument { pgaMode = Out, pgaName = Just "p2", pgaType = "varchar", pgaOptional = False }]
-
-
   describe "pgArgumentList (incorrect declarations)" $ do
-    let test t = testParser (pgArgumentList True) t . Left
-
-    it "fails when an optional argument is followed by mandatory one" $ do
-      test "p1 bigint, p2 varchar default 'foo', p3 varchar"
-        (DefaultValueExpected
-          PGArgument { pgaMode = In, pgaName = Just "p3", pgaType = "varchar", pgaOptional = False })
-
-    it "fails when VARIADIC variable followed by non-OUT variable" $ do
-      test "variadic p1 bigint, out p2 varchar, in p3 varchar"
-        (NonOutVariableAfterVariadic
-          PGArgument { pgaMode = In, pgaName = Just "p3", pgaType = "varchar", pgaOptional = False })
-
-    it "fails when OUT or VARIADIC variable specified with default value" $ do
-      test "out p bigint default 1"
-        (DefaultValueNotExpected
-          PGArgument { pgaMode = Out, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
-      test "variadic p bigint default 1"
-        (DefaultValueNotExpected
-          PGArgument { pgaMode = Variadic, pgaName = Just "p", pgaType = "bigint", pgaOptional = True })
+    let prop' e t = propParserLeft (tagWith t (pgArgumentList True))
+          ("throws " ++ e)
+          . flip shouldSatisfy $ isPrefixOf e
+    prop' "DefaultValueExpected"        (Proxy :: Proxy TPGALFailedCheckExpectedDefaults)
+    prop' "DefaultValueNotExpected"     (Proxy :: Proxy TPGALFailedCheckNotExpectedDefaults)
+    prop' "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
 
 
 
