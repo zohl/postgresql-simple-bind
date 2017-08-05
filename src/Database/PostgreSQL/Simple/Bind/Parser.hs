@@ -112,6 +112,12 @@ asciiCIs = fmap (T.intercalate " ") . asciiCIs' where
   asciiCIs' [] = pure []
   asciiCIs' ws = (uncurry (liftA2 (:))) . ((( <* ss) . asciiCI . head) &&& (asciiCIs' . tail)) $ ws
 
+withParentheses :: Parser a -> Parser a
+withParentheses p = (char '(') *> p <* (char ')')
+
+withSpaces :: Parser a -> Parser a
+withSpaces p = ss *> p <* ss
+
 
 -- | Parser for a tag of dollar-quoted string literal.
 pgTag :: Parser Text
@@ -248,7 +254,7 @@ pgExactType = do
       , ["second"]])
 
     pgTypeModifier :: Parser (Maybe Text)
-    pgTypeModifier = ((char '(') *> (Just <$> pgTypeModifier') <* (char ')'))
+    pgTypeModifier = (withParentheses $ Just <$> pgTypeModifier')
                  <|> pure Nothing where
       pgTypeModifier' = pgString <|> takeWhile1 (/= ')')
 
@@ -286,7 +292,7 @@ pgResult = ss *> (pgResultSetOf <|> pgResultTable <|> pgResultSingle) where
   pgResultSetOf = fmap (PGSetOf . pure) $ asciiCI "setof" *> ss *> pgType
 
   pgResultTable :: Parser PGResult
-  pgResultTable = fmap PGTable $ asciiCI "table" *> ss *> char '(' *> (ss *> pgColumn <* ss) `sepBy` (char ',') <* ss <* char ')'
+  pgResultTable = fmap PGTable $ asciiCI "table" *> ss *> (withParentheses $ (withSpaces pgColumn) `sepBy` (char ',') <* ss)
 
   pgColumn :: Parser PGColumn
   pgColumn = liftA2 PGColumn
@@ -370,7 +376,7 @@ checkVariadic  mode _
 -- | Parser for an argument list as in 'pg_catalog.pg_get_function_result'.
 pgArgumentList :: Bool -> Parser [PGArgument]
 pgArgumentList doCheck = do
-  args <- ((ss *> pgArgument <* ss) `sepBy` (char ','))
+  args <- ((withSpaces pgArgument) `sepBy` (char ','))
 
   when doCheck $ do
     let check (t, e) = maybe (pure ()) (fail . show . e) (t pgaMode pgaOptional args)
@@ -447,12 +453,12 @@ pgFunction = do
   pgfIdentifier <- ss *> pgQualifiedIdentifier
 
   (pgfArguments, pgfResult) <- liftM2 (,)
-    (ss *> char '(' *> pgArgumentList True  <* char ')')
+    (ss *> (withParentheses $ pgArgumentList True))
     (ss *> (asciiCI "returns" *> ss *> (Just <$> pgResult)) <|> (return Nothing))
     >>= uncurry normalizeFunction
 
   _ <- ss *> (pgFunctionProperty `sepBy` ss)
-  _ <- ss *> (asciiCI "with" *> ((ss *> pgFunctionObsoleteProperty <* ss) `sepBy` (char ',')) *> pure ()) <|> pure ()
+  _ <- ss *> (asciiCI "with" *> ((withSpaces pgFunctionObsoleteProperty) `sepBy` (char ',')) *> pure ()) <|> pure ()
 
   return PGFunction {..}
 
