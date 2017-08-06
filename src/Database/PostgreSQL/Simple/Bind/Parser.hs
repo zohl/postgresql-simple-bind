@@ -426,6 +426,8 @@ pgFunctionProperty =
   <|> parallel       *> pure ()
   <|> cost           *> pure ()
   <|> rows           *> pure ()
+  <|> transform      *> pure ()
+  <|> set            *> pure ()
   where
     language       = asciiCI "language" *> ss *> (pgNormalIdentifier <|> (char '\'' *> pgQuotedString '\''))
     loadableObject = asciiCI "as" *> ss *> pgString *> ss *> char ',' *> ss *> pgString
@@ -441,6 +443,17 @@ pgFunctionProperty =
     parallel       = asciiCI "parallel" *> ss *> (asciiCI "unsafe" <|> asciiCI "restricted" <|> asciiCI "safe")
     cost           = asciiCI "cost" *> ss *> (decimal :: Parser Int)
     rows           = asciiCI "rows" *> ss *> (decimal :: Parser Int)
+    transform      = asciiCI "transform" *> ((ss *> asciiCIs ["for", "type"] *> ss *> optionallyQualified pgExactType) `sepBy` (char ','))
+    set            = asciiCI "set" *> ss *> pgNormalIdentifier *> ss *> (
+                         (asciiCI "to" *> ss *> value        *> pure ())
+                     <|> (string "="   *> ss *> value        *> pure ())
+                     <|> (asciiCIs ["from", "current"] *> ss *> pure ()))
+      where
+        value  = ((withSpaces value') `sepBy` (char ',')) <|> (pure <$> value')
+        value' = pgString                *> pure ()
+             <|> pgQualifiedIdentifier   *> pure ()
+             <|> (decimal :: Parser Int) *> pure ()
+
 
 -- | Parser for an obsolete function property (WITH clause).
 pgFunctionObsoleteProperty :: Parser ()

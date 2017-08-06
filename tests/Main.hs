@@ -730,6 +730,19 @@ spec = do
       test' [str|create function foo() returns void as '' with isStrict|]
       test' [str|create function foo() returns void as '' with isCachable, isStrict|]
 
+      test' [str|create function foo() returns void as '' transform for type bigint|]
+      test' [str|create function foo() returns void as '' transform for type bigint, for type varchar|]
+
+      test' [str|create function foo() returns void as '' set foo = bar|]
+      test' [str|create function foo() returns void as '' set foo to bar|]
+      test' [str|create function foo() returns void as '' set foo from current|]
+
+      test' [str|create function foo() returns void as ''
+                | set foo = 'bar'
+                | set bar = 42, 21
+                | set baz = qux|]
+
+
   describe "pgFunction (incorrect declarations)" $ do
     let test t = testParser pgFunction t . Left
 
