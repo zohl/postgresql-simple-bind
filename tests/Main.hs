@@ -126,7 +126,7 @@ instance PGSql TestPGString where
 data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
 
 instance Arbitrary TestPGNormalIdentifier where
-  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId) `suchThat` ((> 0) . length)
+  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId) `suchThat` (not . null)
 
 instance PGSql TestPGNormalIdentifier where
   render (TestPGNormalIdentifier s) = s
@@ -137,7 +137,7 @@ data TestPGIdentifier = TestPGIdentifier String deriving (Show)
 instance Arbitrary TestPGIdentifier where
   arbitrary = TestPGIdentifier <$> oneof [
       render <$> (arbitrary :: Gen TestPGNormalIdentifier)
-    , ('"':) . render <$> (arbitrary :: Gen (TestPGQuotedString "\""))]
+    , (('"':) . render <$> (arbitrary :: Gen (TestPGQuotedString "\""))) `suchThat` ((> 2) . length)]
 
 instance PGSql TestPGIdentifier where
   render (TestPGIdentifier s) = s
@@ -258,7 +258,7 @@ instance Arbitrary TestPGExactType where
              , "hour"
              , "minute"
              , "second"])
-        , (render <$> (arbitrary :: Gen TestPGIdentifier)) `suchThat` (not . null)]
+        , (render <$> (arbitrary :: Gen TestPGIdentifier))]
 
       arbitraryTypeModifier = oneof [
             return ""
@@ -373,7 +373,7 @@ wrap check (TestPGArgumentList xs)
         (maybe False (const True) . tpgaDefaultValue)
     $ xs
 
-newtype TPGALCorrect = TPGALCorrect TestPGArgumentList deriving (Show)
+newtype TPGALCorrect = TPGALCorrect { getArgumentList :: TestPGArgumentList } deriving (Show)
 
 instance Arbitrary TPGALCorrect where
   arbitrary = TPGALCorrect <$> arbitrary
@@ -427,6 +427,37 @@ instance Arbitrary TPGALFailedCheckVariadic where
 
 instance PGSql TPGALFailedCheckVariadic where
   render (TPGALFailedCheckVariadic x) = render x
+
+
+data TestPGFunction = TestPGFunction {
+    tpgfIdentifier   :: TestPGQualifiedIdentifier
+  , tpgfOrReplace    :: Bool
+  , tpgfArgumentList :: TestPGArgumentList
+  , tpgfResult       :: Maybe TestPGResult
+  , tpgfProperties   :: [String]
+  }
+
+instance Show TestPGFunction where
+  show x = render x
+
+instance Arbitrary TestPGFunction where
+  arbitrary = do
+    tpgfOrReplace    <- arbitrary
+    tpgfIdentifier   <- arbitrary
+    tpgfArgumentList <- getArgumentList <$> arbitrary
+    tpgfResult       <- arbitrary `suchThat` (isJust)
+    tpgfProperties   <- return [] -- TODO
+    return TestPGFunction {..}
+
+instance PGSql TestPGFunction where
+  render (TestPGFunction {..}) = concat $ [
+      "create "
+    , if tpgfOrReplace then "or replace " else ""
+    , "function "
+    , render tpgfIdentifier
+    , " (", render tpgfArgumentList, ") "
+    , fromMaybe "" . fmap (("returns " ++)  . render) $ tpgfResult
+    , intercalate " " tpgfProperties]
 
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
@@ -567,6 +598,9 @@ spec = do
     prop' "DefaultValueNotExpected"     (Proxy :: Proxy TPGALFailedCheckNotExpectedDefaults)
     prop' "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
 
+  describe "pgFunction" $ do
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGFunction) pgFunction)
+    prop' "parsing works" . flip shouldSatisfy $ const True
 
 
 
