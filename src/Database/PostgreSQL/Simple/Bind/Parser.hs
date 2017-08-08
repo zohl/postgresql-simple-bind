@@ -87,20 +87,20 @@ data ParserException
   = NoReturnTypeInfo
     -- ^ Thrown when function has no 'RETURNS' clause and no 'OUT'
     -- arguments.
-  | IncoherentReturnTypes PGResult PGResult
+  | IncoherentReturnTypes String String
     -- ^ Thrown when function has incoherent 'RETURNS' clause and 'OUT'
     -- arguments.
   | QuoteNotSupported Char
     -- ^ Thrown when string literal starts with non-supported symbol.
-  | NonOutVariableAfterVariadic PGArgument
+  | NonOutVariableAfterVariadic String
     -- ^ Thrown when encountered a non-OUT argument after VARIADIC one.
-  | DefaultValueExpected PGArgument
+  | DefaultValueExpected String
     -- ^ Thrown when encountered an argument that must have
     -- default value (i.e. after another argument with default value).
-  | DefaultValueNotExpected PGArgument
+  | DefaultValueNotExpected String
     -- ^ Thrown when encountered an argument that must NOT have
     -- default value (i.e. VARIADIC or OUT).
-  deriving (Show)
+    deriving Show
 
 
 ss :: Parser ()
@@ -338,17 +338,18 @@ pgArgument = do
               return False))
 
 type ArgumentListChecker t
-  =  (t -> PGArgumentMode)  -- ^ Mode of an argument.
-  -> (t -> Bool)            -- ^ Is an argument optional?
-  -> [t]                    -- ^ Argument list.
-  -> Maybe t                -- ^ First argument, that violates the test.
+  =  (t -> PGArgumentMode)      -- ^ Mode of an argument.
+  -> (t -> Bool)                -- ^ Is an argument optional?
+  -> [t]                        -- ^ Argument list.
+  -> Either ParserException ()  -- ^ Exception, if the test has failed.
 
 -- | Checks the following property of an argument list:
 --   all input arguments following an argument with a default value
 --   must have default values as well.
-checkExpectedDefaults :: ArgumentListChecker t
+checkExpectedDefaults :: (Show t) => ArgumentListChecker t
 checkExpectedDefaults mode optional
-  = listToMaybe
+  = maybe  (Right ()) (Left . DefaultValueExpected . show)
+  . listToMaybe
   . dropWhile optional
   . dropWhile (not . optional)
   . filter ((`elem` [In, InOut]) . mode)
@@ -356,18 +357,20 @@ checkExpectedDefaults mode optional
 
 -- | Checks the following property of an argument list:
 --   only input arguments can have default values.
-checkNotExpectedDefaults :: ArgumentListChecker t
+checkNotExpectedDefaults :: (Show t) => ArgumentListChecker t
 checkNotExpectedDefaults mode optional
-  = listToMaybe
+  = maybe (Right ()) (Left . DefaultValueNotExpected . show)
+  . listToMaybe
   . filter optional
   . filter ((`elem` [Out, Variadic]) . mode)
 
 
 -- | Checks the following property of an argument list:
 --   only OUT arguments can follow VARIADIC one.
-checkVariadic :: ArgumentListChecker t
+checkVariadic :: (Show t) => ArgumentListChecker t
 checkVariadic  mode _
-  = listToMaybe
+  = maybe (Right ()) (Left . NonOutVariableAfterVariadic . show)
+  . listToMaybe
   . filter ((/= Out) . mode)
   . tailSafe . snd
   . break ((== Variadic) . mode)
@@ -379,38 +382,35 @@ pgArgumentList doCheck = do
   args <- ((withSpaces pgArgument) `sepBy` (char ','))
 
   when doCheck $ do
-    let check (t, e) = maybe (pure ()) (fail . show . e) (t pgaMode pgaOptional args)
-    mapM_ check [
-        (checkExpectedDefaults,    DefaultValueExpected)
-      , (checkNotExpectedDefaults, DefaultValueNotExpected)
-      , (checkVariadic,            NonOutVariableAfterVariadic)]
+    let check t = either
+          (fail . show)
+          (pure)
+          (t pgaMode pgaOptional args)
+    mapM_ check [checkExpectedDefaults, checkNotExpectedDefaults, checkVariadic]
 
   return args
 
 
 -- | Move 'Out' arguments to PGResult record.
-normalizeFunction :: [PGArgument] -> Maybe PGResult -> Parser ([PGArgument], PGResult)
-normalizeFunction args mr = do
-  let (iArgs, mres') = second mkResult $ splitArgs args
-  r <- mergeResults mr mres' >>= maybe (fail . show $ NoReturnTypeInfo) return
-  return (iArgs, r) where
+normalizeFunction :: ([PGArgument], Maybe PGResult) -> Either ParserException ([PGArgument], PGResult)
+normalizeFunction (args, mr) = do
+  let (inArgs, outArgs) = filter ((/= Out) . pgaMode) &&& filter ((`elem` [Out, InOut]) . pgaMode) $ args
 
-    splitArgs :: [PGArgument] -> ([PGArgument], [PGArgument])
-    splitArgs = (filter ((/= Out) . pgaMode)) &&& (filter ((flip elem [Out, InOut]) . pgaMode))
+  let mr' = if null outArgs
+      then Nothing
+      else Just (PGSingle $ map pgaType outArgs)
 
-    mkResult :: [PGArgument] -> Maybe PGResult
-    mkResult = \case
-      []  -> Nothing
-      as  -> Just . PGSingle . map (pgaType) $ as
+  r <- case (liftA2 (,) mr mr') of
+         Nothing -> maybe
+           (Left $ NoReturnTypeInfo)
+           (Right)
+           (mr <|> mr')
+         Just (r, r') -> maybe
+           (Left $ IncoherentReturnTypes (show r) (show r'))
+           (Right)
+           (mergePGResults r r')
 
-    mergeResults :: Maybe PGResult -> Maybe PGResult -> Parser (Maybe PGResult)
-    mergeResults mres mres' = maybe
-     (return $ mres <|> mres')
-     (\(res, res') -> maybe
-       (fail . show $ IncoherentReturnTypes res res')
-       (return . Just)
-       (mergePGResults res res'))
-     (liftA2 (,) mres mres')
+  return (inArgs, r)
 
 -- | Parser for a function property.
 pgFunctionProperty :: Parser ()
@@ -468,7 +468,7 @@ pgFunction = do
   (pgfArguments, pgfResult) <- liftM2 (,)
     (ss *> (withParentheses $ pgArgumentList True))
     (ss *> (asciiCI "returns" *> ss *> (Just <$> pgResult)) <|> (return Nothing))
-    >>= uncurry normalizeFunction
+    >>= either (fail . show) return . normalizeFunction
 
   _ <- ss *> (pgFunctionProperty `sepBy` ss)
   _ <- ss *> (asciiCI "with" *> ((withSpaces pgFunctionObsoleteProperty) `sepBy` (char ',')) *> pure ()) <|> pure ()

@@ -367,7 +367,7 @@ instance PGSql TestPGArgumentList where
 
 wrap :: ArgumentListChecker TestPGArgument -> TestPGArgumentList -> Bool
 wrap check (TestPGArgumentList xs)
-    = maybe True (const False)
+    = either (const False) (const True)
     . check
         (fromMaybe In . tpgaMode)
         (maybe False (const True) . tpgaDefaultValue)
@@ -791,15 +791,15 @@ spec = do
             |returns timestamptz as
             |$$ select 42::bigint, 'test'::varchar $$|]
         (IncoherentReturnTypes
-          (PGSingle ["timestamptz"])
-          (PGSingle ["bigint", "varchar"]))
+          (show $ PGSingle ["timestamptz"])
+          (show $ PGSingle ["bigint", "varchar"]))
 
       test
         [str|create function foo(out p1 bigint)
             |returns table (p1 bigint) as ''|]
         (IncoherentReturnTypes
-          (PGTable [PGColumn {pgcName = "p1", pgcType = "bigint"}])
-          (PGSingle ["bigint"]))
+          (show $ PGTable [PGColumn {pgcName = "p1", pgcType = "bigint"}])
+          (show $ PGSingle ["bigint"]))
 
 
   describe "pgDeclarations" $ do
