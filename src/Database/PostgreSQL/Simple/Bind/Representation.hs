@@ -19,6 +19,7 @@ module Database.PostgreSQL.Simple.Bind.Representation (
   , PGColumn(..)
   , PGResult(..)
   , PGIdentifier(..)
+  , PGTypeClass(..)
   , PGType(..)
   , mergePGResults
   ) where
@@ -44,6 +45,11 @@ instance IsString PGIdentifier where
   fromString s = PGIdentifier { pgiSchema = Nothing, pgiName = s }
 
 
+-- | Class of types that can represent a PostgreSQL type.
+class (Show t, Eq t) => PGTypeClass t where
+  mergeTypes :: [t] -> [t] -> Maybe [t]
+
+-- | Representation of a PostgreSQL type.
 data PGType = PGType {
     pgtIdentifier :: PGIdentifier
   , pgtModifiers  :: Maybe String
@@ -51,6 +57,16 @@ data PGType = PGType {
 
 instance IsString PGType where
   fromString s = PGType { pgtIdentifier = fromString s, pgtModifiers = Nothing }
+
+instance PGTypeClass PGType where
+  mergeTypes ts ts' =
+    if ts == ts' || ((length ts' > 1) && ts == [recordType])
+    then Just ts'
+    else Nothing where
+      recordType = PGType {
+          pgtIdentifier = PGIdentifier {pgiSchema = Nothing, pgiName = "record"}
+        , pgtModifiers = Nothing
+        }
 
 
 -- | Representation of a function's argument.
@@ -81,16 +97,6 @@ data PGResult
   | PGTable  [PGColumn]
     deriving (Show, Eq)
 
-
-mergeTypes :: [PGType] -> [PGType] -> Maybe [PGType]
-mergeTypes ts ts' =
-  if ts == ts' || ((length ts' > 1) && ts == [recordType])
-  then Just ts'
-  else Nothing where
-    recordType = PGType {
-        pgtIdentifier = PGIdentifier {pgiSchema = Nothing, pgiName = "record"}
-      , pgtModifiers = Nothing
-      }
 
 -- | Merge 'PGResult' derived from RETURNING clause (first) and
 --   derived from arguments (second).

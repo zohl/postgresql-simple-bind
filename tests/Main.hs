@@ -19,7 +19,7 @@ import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
 import Data.Default (def)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGType(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGTypeClass(..), PGType(..))
 import Text.Heredoc (str)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
@@ -296,7 +296,7 @@ instance PGSql TestPGExactType where
     [name, modifier, timeZone, dimensions]
 
 
-data TestPGType = TestPGType String deriving (Show)
+data TestPGType = TestPGType String deriving (Show, Eq)
 
 instance Arbitrary TestPGType where
   arbitrary = TestPGType <$> oneof [
@@ -305,6 +305,13 @@ instance Arbitrary TestPGType where
 
 instance PGSql TestPGType where
   render (TestPGType s) = s
+
+instance PGTypeClass TestPGType where
+  mergeTypes ts ts' =
+    if ts == ts' || ((length ts' > 1) && ts == [recordType])
+    then Just ts'
+    else Nothing where
+      recordType = TestPGType "record"
 
 
 data TestPGResult
