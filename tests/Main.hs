@@ -5,6 +5,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 module Main where
 
 import Control.Arrow (second)
@@ -19,7 +21,7 @@ import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
 import Data.Default (def)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGTypeClass(..), PGType(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGTypeClass(..), PGType(..))
 import Text.Heredoc (str)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
@@ -132,7 +134,7 @@ instance PGSql TestPGNormalIdentifier where
   render (TestPGNormalIdentifier s) = s
 
 
-data TestPGIdentifier = TestPGIdentifier String deriving (Show)
+data TestPGIdentifier = TestPGIdentifier String deriving (Show, Eq)
 
 instance Arbitrary TestPGIdentifier where
   arbitrary = TestPGIdentifier <$> oneof [
@@ -343,7 +345,7 @@ data TestPGArgument = TestPGArgument {
   , tpgaType            :: TestPGType
   , tpgaDefaultNotation :: String
   , tpgaDefaultValue    :: Maybe String
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 instance Arbitrary TestPGArgument where
   arbitrary = do
@@ -360,6 +362,11 @@ instance PGSql TestPGArgument where
     , (++ " ") . render <$> tpgaName
     , Just . render $ tpgaType
     , (' ':)  . (tpgaDefaultNotation ++) . (' ':) <$> tpgaDefaultValue]
+
+instance PGArgumentClass TestPGArgument TestPGType where
+  argumentMode     = fromMaybe In . tpgaMode
+  argumentOptional = maybe False (const True) . tpgaDefaultValue
+  argumentType     = tpgaType
 
 
 data TestPGArgumentList = TestPGArgumentList [TestPGArgument] deriving (Show)

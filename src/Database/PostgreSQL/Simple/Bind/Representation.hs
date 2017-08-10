@@ -10,10 +10,13 @@
 -}
 
 {-# LANGUAGE DeriveLift #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
 
 
 module Database.PostgreSQL.Simple.Bind.Representation (
     PGFunction(..)
+  , PGArgumentClass(..)
   , PGArgument(..)
   , PGArgumentMode(..)
   , PGColumn(..)
@@ -69,6 +72,12 @@ instance PGTypeClass PGType where
         }
 
 
+-- | Class of types that can represent an argument of PostgreSQL function.
+class (PGTypeClass t, Show a, Eq a) => PGArgumentClass a t | a -> t where
+  argumentMode     :: a -> PGArgumentMode
+  argumentOptional :: a -> Bool
+  argumentType     :: a -> t
+
 -- | Representation of a function's argument.
 data PGArgument = PGArgument {
     pgaMode     :: PGArgumentMode
@@ -76,6 +85,12 @@ data PGArgument = PGArgument {
   , pgaType     :: PGType
   , pgaOptional :: Bool
   } deriving (Show, Eq, Lift)
+
+instance PGArgumentClass PGArgument PGType where
+  argumentMode     = pgaMode
+  argumentOptional = pgaOptional
+  argumentType     = pgaType
+
 
 -- | Representation of a PostrgeSQL function signature (schema, name, arguments, result).
 data PGFunction = PGFunction {
