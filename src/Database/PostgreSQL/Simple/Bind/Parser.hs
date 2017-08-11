@@ -75,7 +75,7 @@ import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar')
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGType(..), mergePGResults)
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..),  PGResult(..), PGIdentifier(..), PGType(..))
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Safe (tailSafe)
 import qualified Data.Text as T
@@ -408,7 +408,7 @@ normalizeFunction (args, mr) = do
          Just (r, r') -> maybe
            (Left $ IncoherentReturnTypes (show r) (show r'))
            (Right)
-           (mergePGResults r r')
+           (mergeResults r r')
 
   return (inArgs, r)
 

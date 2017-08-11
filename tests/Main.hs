@@ -21,7 +21,7 @@ import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
 import Data.Default (def)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResult(..), PGIdentifier(..), PGTypeClass(..), PGType(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..), PGType(..))
 import Text.Heredoc (str)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
@@ -317,23 +317,30 @@ instance PGTypeClass TestPGType where
 
 
 data TestPGResult
-  = TestPGResultSingle String
-  | TestPGResultSetOf String
-  | TestPGResultTable [(String, String)]
-    deriving (Show)
+  = TestPGResultSingle [TestPGType]
+  | TestPGResultSetOf [TestPGType]
+  | TestPGResultTable [(TestPGIdentifier, TestPGType)]
+    deriving (Show, Eq)
 
 instance Arbitrary TestPGResult where
   arbitrary = oneof [arbitraryResultSingle, arbitraryResultSetOf, arbitraryResultTable] where
-    arbitraryResultSingle = TestPGResultSingle . render <$> (arbitrary :: Gen TestPGType)
-    arbitraryResultSetOf = TestPGResultSetOf . render <$> (arbitrary :: Gen TestPGType)
-    arbitraryResultTable = TestPGResultTable <$> listOf1 (liftM2 (,)
-      (render <$> (arbitrary :: Gen TestPGIdentifier))
-      (render <$> (arbitrary :: Gen TestPGType)))
+    arbitraryResultSingle = TestPGResultSingle . pure <$> arbitrary
+    arbitraryResultSetOf = TestPGResultSetOf . pure <$> arbitrary
+    arbitraryResultTable = TestPGResultTable <$> listOf1 (liftM2 (,) arbitrary arbitrary)
 
 instance PGSql TestPGResult where
-  render (TestPGResultSingle s) = s
-  render (TestPGResultSetOf s) = "setof " ++ s
-  render (TestPGResultTable cs) = "table (" ++ (intercalate ", " . map (uncurry (++) . second (' ':)) $ cs) ++ ")"
+  render (TestPGResultSingle s) = intercalate ", " . map render $ s
+  render (TestPGResultSetOf s) = ("setof " ++) . (intercalate ", ") . map render $ s
+  render (TestPGResultTable cs) =
+    ("table (" ++) . (++ ")") . intercalate "," . map (\(c, t) -> render c ++ " " ++ render t) $ cs
+
+instance PGResultClass TestPGResult TestPGType where
+  mergeResults (TestPGResultSingle ts) (TestPGResultSingle ts') = TestPGResultSingle <$> (mergeTypes ts ts')
+  mergeResults (TestPGResultSetOf  ts) (TestPGResultSetOf  ts') = TestPGResultSetOf  <$> (mergeTypes ts ts')
+  mergeResults (TestPGResultSetOf  ts) (TestPGResultSingle ts') = TestPGResultSetOf  <$> (mergeTypes ts ts')
+  mergeResults _                       _                        = Nothing
+
+  resultSingle = TestPGResultSingle
 
 
 instance Arbitrary PGArgumentMode where

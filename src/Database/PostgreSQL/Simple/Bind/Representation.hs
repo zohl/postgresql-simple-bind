@@ -20,11 +20,11 @@ module Database.PostgreSQL.Simple.Bind.Representation (
   , PGArgument(..)
   , PGArgumentMode(..)
   , PGColumn(..)
+  , PGResultClass(..)
   , PGResult(..)
   , PGIdentifier(..)
   , PGTypeClass(..)
   , PGType(..)
-  , mergePGResults
   ) where
 
 
@@ -105,6 +105,12 @@ data PGColumn = PGColumn {
   , pgcType :: PGType
   } deriving (Show, Eq)
 
+
+-- | Class of types that can represent a result of PostgreSQL function.
+class (PGTypeClass t, Show r, Eq r) => PGResultClass r t | r -> t where
+  mergeResults :: r -> r -> Maybe r
+  resultSingle :: [t] -> r
+
 -- | Representation of a function's return value.
 data PGResult
   = PGSingle [PGType]
@@ -112,11 +118,10 @@ data PGResult
   | PGTable  [PGColumn]
     deriving (Show, Eq)
 
+instance PGResultClass PGResult PGType where
+  mergeResults (PGSingle ts) (PGSingle ts') = PGSingle <$> (mergeTypes ts ts')
+  mergeResults (PGSetOf  ts) (PGSetOf  ts') = PGSetOf  <$> (mergeTypes ts ts')
+  mergeResults (PGSetOf  ts) (PGSingle ts') = PGSetOf  <$> (mergeTypes ts ts')
+  mergeResults _             _              = Nothing
 
--- | Merge 'PGResult' derived from RETURNING clause (first) and
---   derived from arguments (second).
-mergePGResults :: PGResult -> PGResult -> Maybe PGResult
-mergePGResults (PGSingle ts) (PGSingle ts') = PGSingle <$> (mergeTypes ts ts')
-mergePGResults (PGSetOf  ts) (PGSetOf  ts') = PGSetOf  <$> (mergeTypes ts ts')
-mergePGResults (PGSetOf  ts) (PGSingle ts') = PGSetOf  <$> (mergeTypes ts ts')
-mergePGResults _             _              = Nothing
+  resultSingle = PGSingle
