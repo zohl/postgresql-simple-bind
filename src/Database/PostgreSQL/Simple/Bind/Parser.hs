@@ -75,7 +75,7 @@ import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar')
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..),  PGResult(..), PGIdentifier(..), PGType(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..),  PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..), PGType(..))
 import Database.PostgreSQL.Simple.Bind.Common (PostgresBindException(..))
 import Safe (tailSafe)
 import qualified Data.Text as T
@@ -337,43 +337,42 @@ pgArgument = do
               when (maybe False (not . inClass ",)") mc) $ fail "TODO"
               return False))
 
-type ArgumentListChecker t
-  =  (t -> PGArgumentMode)      -- ^ Mode of an argument.
-  -> (t -> Bool)                -- ^ Is an argument optional?
-  -> [t]                        -- ^ Argument list.
-  -> Either ParserException ()  -- ^ Exception, if the test has failed.
+
+-- | A type of a function to check list of arguments.
+type ArgumentListChecker a = [a] -> Either ParserException ()
+
 
 -- | Checks the following property of an argument list:
 --   all input arguments following an argument with a default value
 --   must have default values as well.
-checkExpectedDefaults :: (Show t) => ArgumentListChecker t
-checkExpectedDefaults mode optional
+checkExpectedDefaults :: (PGTypeClass t, PGArgumentClass a t) => ArgumentListChecker a
+checkExpectedDefaults
   = maybe  (Right ()) (Left . DefaultValueExpected . show)
   . listToMaybe
-  . dropWhile optional
-  . dropWhile (not . optional)
-  . filter ((`elem` [In, InOut]) . mode)
+  . dropWhile argumentOptional
+  . dropWhile (not . argumentOptional)
+  . filter ((`elem` [In, InOut]) . argumentMode)
 
 
 -- | Checks the following property of an argument list:
 --   only input arguments can have default values.
-checkNotExpectedDefaults :: (Show t) => ArgumentListChecker t
-checkNotExpectedDefaults mode optional
+checkNotExpectedDefaults :: (PGTypeClass t, PGArgumentClass a t) => ArgumentListChecker a
+checkNotExpectedDefaults
   = maybe (Right ()) (Left . DefaultValueNotExpected . show)
   . listToMaybe
-  . filter optional
-  . filter ((`elem` [Out, Variadic]) . mode)
+  . filter argumentOptional
+  . filter ((`elem` [Out, Variadic]) . argumentMode)
 
 
 -- | Checks the following property of an argument list:
 --   only OUT arguments can follow VARIADIC one.
-checkVariadic :: (Show t) => ArgumentListChecker t
-checkVariadic  mode _
+checkVariadic :: (PGTypeClass t, PGArgumentClass a t) => ArgumentListChecker a
+checkVariadic
   = maybe (Right ()) (Left . NonOutVariableAfterVariadic . show)
   . listToMaybe
-  . filter ((/= Out) . mode)
+  . filter ((/= Out) . argumentMode)
   . tailSafe . snd
-  . break ((== Variadic) . mode)
+  . break ((== Variadic) . argumentMode)
 
 
 -- | Parser for an argument list as in 'pg_catalog.pg_get_function_result'.
@@ -382,23 +381,23 @@ pgArgumentList doCheck = do
   args <- ((withSpaces pgArgument) `sepBy` (char ','))
 
   when doCheck $ do
-    let check t = either
-          (fail . show)
-          (pure)
-          (t pgaMode pgaOptional args)
+    let check t = either (fail . show) (pure) (t args)
     mapM_ check [checkExpectedDefaults, checkNotExpectedDefaults, checkVariadic]
 
   return args
 
 
 -- | Move 'Out' arguments to PGResult record.
-normalizeFunction :: ([PGArgument], Maybe PGResult) -> Either ParserException ([PGArgument], PGResult)
+normalizeFunction
+  :: (PGTypeClass t, PGArgumentClass a t, PGResultClass r t)
+  => ([a], Maybe r)
+  -> Either ParserException ([a], r)
 normalizeFunction (args, mr) = do
-  let (inArgs, outArgs) = filter ((/= Out) . pgaMode) &&& filter ((`elem` [Out, InOut]) . pgaMode) $ args
+  let (inArgs, outArgs) = filter ((/= Out) . argumentMode) &&& filter ((`elem` [Out, InOut]) . argumentMode) $ args
 
   let mr' = if null outArgs
       then Nothing
-      else Just (PGSingle $ map pgaType outArgs)
+      else Just (resultSingle $ map argumentType outArgs)
 
   r <- case (liftA2 (,) mr mr') of
          Nothing -> maybe

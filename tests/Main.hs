@@ -387,12 +387,7 @@ instance PGSql TestPGArgumentList where
 
 
 wrap :: ArgumentListChecker TestPGArgument -> TestPGArgumentList -> Bool
-wrap check (TestPGArgumentList xs)
-    = either (const False) (const True)
-    . check
-        (fromMaybe In . tpgaMode)
-        (maybe False (const True) . tpgaDefaultValue)
-    $ xs
+wrap check (TestPGArgumentList xs) = either (const False) (const True) . check $ xs
 
 newtype TPGALCorrect = TPGALCorrect { getArgumentList :: TestPGArgumentList } deriving (Show)
 
