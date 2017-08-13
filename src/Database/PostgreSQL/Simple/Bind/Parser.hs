@@ -57,6 +57,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , checkVariadic
   , pgArgumentList
 
+  , normalizeFunction
   , pgFunction
   , pgDeclarations
   , ParserException(..)

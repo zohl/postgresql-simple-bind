@@ -9,7 +9,6 @@
 
 module Main where
 
-import Control.Arrow (second)
 import Data.Char (chr, isNumber, toLower)
 import Data.List (isPrefixOf, isInfixOf, isSuffixOf, intercalate, tails)
 import Data.Maybe (listToMaybe, fromMaybe, catMaybes, isJust, isNothing)
@@ -21,7 +20,7 @@ import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
 import Data.Default (def)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..), PGType(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
 import Text.Heredoc (str)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
@@ -376,7 +375,7 @@ instance PGArgumentClass TestPGArgument TestPGType where
   argumentType     = tpgaType
 
 
-data TestPGArgumentList = TestPGArgumentList [TestPGArgument] deriving (Show)
+data TestPGArgumentList = TestPGArgumentList { getArguments :: [TestPGArgument] } deriving (Show)
 
 instance Arbitrary TestPGArgumentList where
   arbitrary = TestPGArgumentList <$> (listOf arbitrary)
@@ -474,6 +473,20 @@ instance PGSql TestPGFunction where
     , " (", render tpgfArgumentList, ") "
     , fromMaybe "" . fmap (("returns " ++)  . render) $ tpgfResult
     , intercalate " " tpgfProperties]
+
+
+newtype TPGFCorrect = TPGFCorrect TestPGFunction deriving (Show)
+
+instance Arbitrary TPGFCorrect where
+  arbitrary = TPGFCorrect <$> arbitrary
+    `suchThat` (\TestPGFunction {..} -> either
+                   (const False)
+                   (const True)
+                 . normalizeFunction $ (getArguments tpgfArgumentList, tpgfResult))
+
+instance PGSql TPGFCorrect where
+  render (TPGFCorrect x) = render x
+
 
 
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
@@ -615,7 +628,7 @@ spec = do
     prop' "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
 
   describe "pgFunction" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGFunction) pgFunction)
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TPGFCorrect) pgFunction)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
 
