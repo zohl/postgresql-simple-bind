@@ -301,7 +301,9 @@ pgResult = ss *> (pgResultSetOf <|> pgResultTable <|> pgResultSingle) where
     (ss *> pgType)
 
   pgResultSingle :: Parser PGResult
-  pgResultSingle = fmap (PGSingle . pure) $ pgType
+  pgResultSingle = pgType >>= \t -> if t == "null"
+                                    then fail "NULL is not a type"
+                                    else return $ PGSingle [t]
 
 
 -- | Parser for an expression (as a default value for an argument).
@@ -449,9 +451,9 @@ pgFunctionProperty =
                      <|> (string "="   *> ss *> value        *> pure ())
                      <|> (asciiCIs ["from", "current"] *> ss *> pure ()))
       where
-        value  = ((withSpaces value') `sepBy` (char ',')) <|> (pure <$> value')
-        value' = pgString                *> pure ()
-             <|> pgQualifiedIdentifier   *> pure ()
+        value  = (withSpaces value') `sepBy` (char ',')
+        value' = pgQualifiedIdentifier   *> pure ()
+             <|> pgString                *> pure ()
              <|> (decimal :: Parser Int) *> pure ()
 
 

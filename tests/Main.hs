@@ -22,7 +22,7 @@ import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
 import Text.Heredoc (str)
-import Test.Hspec
+import Test.Hspec (Expectation, Spec, hspec, describe, it, shouldSatisfy, shouldBe)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements)
 import qualified Data.Text as T
@@ -323,7 +323,7 @@ data TestPGResult
 
 instance Arbitrary TestPGResult where
   arbitrary = oneof [arbitraryResultSingle, arbitraryResultSetOf, arbitraryResultTable] where
-    arbitraryResultSingle = TestPGResultSingle . pure <$> arbitrary
+    arbitraryResultSingle = TestPGResultSingle . pure <$> (arbitrary `suchThat` (/= TestPGType "null"))
     arbitraryResultSetOf = TestPGResultSetOf . pure <$> arbitrary
     arbitraryResultTable = TestPGResultTable <$> listOf1 (liftM2 (,) arbitrary arbitrary)
 
@@ -445,11 +445,12 @@ instance PGSql TPGALFailedCheckVariadic where
 
 
 data TestPGFunction = TestPGFunction {
-    tpgfIdentifier   :: TestPGQualifiedIdentifier
-  , tpgfOrReplace    :: Bool
-  , tpgfArgumentList :: TestPGArgumentList
-  , tpgfResult       :: Maybe TestPGResult
-  , tpgfProperties   :: [String]
+    tpgfIdentifier         :: TestPGQualifiedIdentifier
+  , tpgfOrReplace          :: Bool
+  , tpgfArgumentList       :: TestPGArgumentList
+  , tpgfResult             :: Maybe TestPGResult
+  , tpgfProperties         :: [String]
+  , tpgfObsoleteProperties :: [String]
   }
 
 instance Show TestPGFunction where
@@ -457,12 +458,89 @@ instance Show TestPGFunction where
 
 instance Arbitrary TestPGFunction where
   arbitrary = do
-    tpgfOrReplace    <- arbitrary
-    tpgfIdentifier   <- arbitrary
-    tpgfArgumentList <- getArgumentList <$> arbitrary
-    tpgfResult       <- arbitrary `suchThat` (isJust)
-    tpgfProperties   <- return [] -- TODO
-    return TestPGFunction {..}
+    tpgfOrReplace          <- arbitrary
+    tpgfIdentifier         <- arbitrary
+    tpgfArgumentList       <- getArgumentList <$> arbitrary
+    tpgfResult             <- arbitrary `suchThat` (isJust)
+    tpgfProperties         <- listOf property
+    tpgfObsoleteProperties <- resize 2 $ listOf obsoleteProperty
+
+    return TestPGFunction {..} where
+      property = oneof [
+          language
+        , loadableObject
+        , definition
+        , window
+        , behaviour
+        , leakproof
+        , strictness
+        , security
+        , parallel
+        , cost
+        , rows
+        , transform
+        , set]
+
+      language = ("language " ++) <$> oneof [
+          render <$> (arbitrary :: Gen TestPGNormalIdentifier)
+        , ('\'':) . render <$> (arbitrary :: Gen (TestPGQuotedString "'"))]
+
+      loadableObject = do
+        s1 <- render <$> (arbitrary :: Gen TestPGString)
+        s2 <- render <$> (arbitrary :: Gen TestPGString)
+        return . concat $ ["as ", s1, ", ", s2]
+
+      definition = ("as " ++) . render <$> (arbitrary :: Gen TestPGString)
+
+      window = return "window"
+
+      behaviour = elements ["immutable", "stable", "volatile"]
+
+      leakproof = do
+        not' <- elements ["", "not "]
+        return . concat $ [not', "leakproof"]
+
+      strictness = elements [
+          "called on null input"
+        , "returns null on null input"
+        , "strict"]
+
+      security = do
+        external <- elements ["", "external "]
+        authority <- elements ["invoker", "definer"]
+        return . concat $ [external, "security ", authority]
+
+      parallel = ("parallel " ++) <$> elements ["unsafe", "restricted", "safe"]
+
+      cost = ("cost " ++) . show <$> (arbitrarySizedNatural :: Gen Int)
+
+      rows = ("rows " ++) . show <$> (arbitrarySizedNatural :: Gen Int)
+
+      transform = do
+        types <- listOf1 (arbitrary :: Gen TestPGExactType)
+        return $ "transform " ++ (intercalate "," . map (("for type " ++) . render) $ types)
+
+      set = do
+        identifier <- render <$> (arbitrary :: Gen TestPGNormalIdentifier)
+
+        let value = (intercalate ", ") <$> (resize 4 . listOf1 . oneof $ [
+                render <$> (arbitrary :: Gen TestPGString)
+              , show <$> (arbitrarySizedNatural :: Gen Int)
+              , render <$> (arbitrary :: Gen TestPGQualifiedIdentifier)])
+
+        assignment <- oneof [
+            (" to " ++) <$> value
+          , (" = " ++) <$> value
+          , return " from current"]
+
+        return . concat $ ["set ", identifier, assignment]
+
+
+      obsoleteProperty = elements ["isStrict", "isCachable"]
+
+  shrink f@(TestPGFunction {..}) = if (not . null $ tpgfProperties)
+    then [f {tpgfProperties = ps'} | ps' <- [filter (/= p) tpgfProperties | p <- tpgfProperties]]
+    else []
 
 instance PGSql TestPGFunction where
   render (TestPGFunction {..}) = concat $ [
@@ -472,7 +550,10 @@ instance PGSql TestPGFunction where
     , render tpgfIdentifier
     , " (", render tpgfArgumentList, ") "
     , fromMaybe "" . fmap (("returns " ++)  . render) $ tpgfResult
-    , intercalate " " tpgfProperties]
+    , if (not . null $ tpgfProperties) then " " else ""
+    , intercalate " " tpgfProperties
+    , if (not . null $ tpgfObsoleteProperties) then " with " else ""
+    , intercalate "," tpgfObsoleteProperties]
 
 
 newtype TPGFCorrect = TPGFCorrect TestPGFunction deriving (Show)
@@ -677,203 +758,6 @@ spec = do
     prop' "NoReturnTypeInfo"      (Proxy :: Proxy TPGFFailedNoReturnTypeInfo)
     prop' "IncoherentReturnTypes" (Proxy :: Proxy TPGFFailedIncoherentReturnTypes)
 
-
-  describe "pgFunction" $ do
-    let test t = testParser pgFunction t . Right
-
-    it "works with simple declarations" $ do
-      test
-        [str|create function foo()
-            |returns bigint as
-            |'select 42::bigint'|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult = PGSingle ["bigint"]
-          }
-
-      test
-        [str|create or replace function foo()
-            |returns bigint as
-            |'select 42::bigint'|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult = PGSingle ["bigint"]
-          }
-
-      test
-        [str|create function foo(p_bar varchar)
-            |returns bigint as
-            |$$ select 42::bigint $$|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = [
-                PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}]
-          , pgfResult = PGSingle ["bigint"]
-          }
-
-      test
-        [str|create function foo(p_bar varchar, p_baz varchar)
-            |returns bigint as
-            |$body$
-            |  select 42::bigint'
-            |$body$|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = [
-                PGArgument {pgaMode = def, pgaName = Just "p_bar", pgaType = "varchar", pgaOptional = False}
-              , PGArgument {pgaMode = def, pgaName = Just "p_baz", pgaType = "varchar", pgaOptional = False}]
-          , pgfResult = PGSingle ["bigint"]
-          }
-
-    it "works with schema-qualified functions" $ do
-      test
-        [str|create function public.foo()
-            |returns bigint as
-            |'select 42::bigint'|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Just "public", pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult = PGSingle ["bigint"]
-          }
-
-    it "works with single OUT parameter" $ do
-      test
-        [str|create function foo(out p_result bigint) as
-            |'select 42::bigint'|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult    = PGSingle ["bigint"]
-          }
-
-      test
-        [str|create function foo(out p_result bigint)
-            |returns bigint as
-            |'select 42::bigint'|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult    = PGSingle ["bigint"]
-          }
-
-    it "works with multiple OUT parameters" $ do
-      test
-        [str|create function foo(out p1 bigint, out p2 varchar) as
-            |$$ select 42::bigint, 'test'::varchar $$|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult    = PGSingle ["bigint", "varchar"]
-          }
-
-      test
-        [str|create function foo(out p1 bigint, out p2 varchar)
-            |returns record as
-            |$$ select 42::bigint, 'test'::varchar $$|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult    = PGSingle ["bigint", "varchar"]
-          }
-
-    it "works with OUT parameters and SETOF notation" $ do
-      test
-        [str|create function foo(out p_result bigint)
-            |returns setof bigint as
-            |'select 42::bigint'|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult    = PGSetOf ["bigint"]
-          }
-
-      test
-        [str|create function foo(out p1 bigint, out p2 varchar)
-            |returns setof record as
-            |$$ select 42::bigint, 'test'::varchar $$|]
-        PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult    = PGSetOf ["bigint", "varchar"]
-          }
-
-    it "works with different properties" $ do
-      let test' s = test s PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult    = PGSingle ["void"]
-          }
-
-      test' [str|create function foo() returns void as '' language 'sql'|]
-      test' [str|create function foo() returns void as '' language plpgsql|]
-
-      test' [str|create function foo() returns void as 'test.o', 'foo' language C|]
-
-      test' [str|create function foo() returns void as '' window|]
-
-      test' [str|create function foo() returns void as '' immutable|]
-      test' [str|create function foo() returns void as '' stable|]
-      test' [str|create function foo() returns void as '' volatile|]
-
-      test' [str|create function foo() returns void as '' leakproof|]
-      test' [str|create function foo() returns void as '' not leakproof|]
-
-      test' [str|create function foo() returns void as '' called on null input|]
-      test' [str|create function foo() returns void as '' returns null on null input|]
-      test' [str|create function foo() returns void as '' strict|]
-
-      test' [str|create function foo() returns void as '' external security invoker|]
-      test' [str|create function foo() returns void as '' security definer|]
-
-      test' [str|create function foo() returns void as '' parallel unsafe|]
-      test' [str|create function foo() returns void as '' parallel restricted|]
-      test' [str|create function foo() returns void as '' parallel safe|]
-
-      test' [str|create function foo() returns void as '' cost 100|]
-
-      test' [str|create function foo() returns void as '' rows 100|]
-
-      test' [str|create function foo() returns void as '' with isStrict|]
-      test' [str|create function foo() returns void as '' with isCachable, isStrict|]
-
-      test' [str|create function foo() returns void as '' transform for type bigint|]
-      test' [str|create function foo() returns void as '' transform for type bigint, for type varchar|]
-
-      test' [str|create function foo() returns void as '' set foo = bar|]
-      test' [str|create function foo() returns void as '' set foo to bar|]
-      test' [str|create function foo() returns void as '' set foo from current|]
-
-      test' [str|create function foo() returns void as ''
-                | set foo = 'bar'
-                | set bar = 42, 21
-                | set baz = qux|]
-
-
-  describe "pgFunction (incorrect declarations)" $ do
-    let test t = testParser pgFunction t . Left
-
-    it "fails when cannot determine return type" $ do
-      test
-        "create function foo() as 'select 42::bigint'"
-        NoReturnTypeInfo
-
-    it "fails when return types are incoherent" $ do
-      test
-        [str|create function foo(out p1 bigint, out p2 varchar)
-            |returns timestamptz as
-            |$$ select 42::bigint, 'test'::varchar $$|]
-        (IncoherentReturnTypes
-          (show $ PGSingle ["timestamptz"])
-          (show $ PGSingle ["bigint", "varchar"]))
-
-      test
-        [str|create function foo(out p1 bigint)
-            |returns table (p1 bigint) as ''|]
-        (IncoherentReturnTypes
-          (show $ PGTable [PGColumn {pgcName = "p1", pgcType = "bigint"}])
-          (show $ PGSingle ["bigint"]))
 
 
   describe "pgDeclarations" $ do
