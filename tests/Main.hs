@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Main where
 
@@ -24,7 +25,7 @@ import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumen
 import Text.Heredoc (str)
 import Test.Hspec (Expectation, Spec, hspec, describe, it, shouldSatisfy, shouldBe)
 import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
 import qualified Data.Text as T
 import qualified Data.Bifunctor as B(first)
 
@@ -343,7 +344,7 @@ instance PGResultClass TestPGResult TestPGType where
 
 
 instance Arbitrary PGArgumentMode where
-  arbitrary = elements [In, Out, InOut, Variadic]
+  arbitrary = arbitraryBoundedEnum
 
 data TestPGArgument = TestPGArgument {
     tpgaMode            :: Maybe PGArgumentMode

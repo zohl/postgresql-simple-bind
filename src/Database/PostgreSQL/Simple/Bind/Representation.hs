@@ -33,7 +33,7 @@ import Data.String (IsString(..))
 import Language.Haskell.TH.Syntax (Lift)
 
 -- | Representation of a function argument's mode.
-data PGArgumentMode = In | Out | InOut | Variadic deriving (Show, Eq, Lift)
+data PGArgumentMode = In | Out | InOut | Variadic deriving (Show, Eq, Lift, Enum, Bounded)
 
 instance Default PGArgumentMode where
   def = In
