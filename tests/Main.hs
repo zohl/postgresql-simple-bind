@@ -610,6 +610,36 @@ instance PGSql TPGFFailedIncoherentReturnTypes where
 
 
 
+data TestPGConstant
+  = TPGCString TestPGString
+  deriving (Show)
+
+instance Arbitrary TestPGConstant where
+  arbitrary = oneof [TPGCString <$> arbitrary]
+
+instance PGSql TestPGConstant where
+  render (TPGCString s) = render s
+
+
+data TestPGExpression
+  = TPGEConstant TestPGConstant
+  | TPGEIdentifier TestPGQualifiedIdentifier
+  | TPGEFunctionInvocation TestPGQualifiedIdentifier [TestPGExpression]
+  deriving (Show)
+
+instance Arbitrary TestPGExpression where
+  arbitrary = sized $ \n -> oneof [
+      TPGEConstant <$> arbitrary
+    , TPGEIdentifier <$> arbitrary
+    , TPGEFunctionInvocation <$> arbitrary <*> (listOf $ resize (min 1 (n `div` 2)) arbitrary)]
+
+instance PGSql TestPGExpression where
+  render (TPGEConstant c) = render c
+  render (TPGEIdentifier n) = render n
+  render (TPGEFunctionInvocation n args) = (render n) ++ "(" ++ (intercalate "," . map render $ args) ++ ")"
+
+
+
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
@@ -759,6 +789,9 @@ spec = do
     prop' "NoReturnTypeInfo"      (Proxy :: Proxy TPGFFailedNoReturnTypeInfo)
     prop' "IncoherentReturnTypes" (Proxy :: Proxy TPGFFailedIncoherentReturnTypes)
 
+  describe "pgExpression" $ do
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGExpression) pgExpression)
+    prop' "parsing works" . flip shouldSatisfy $ const True
 
 
   describe "pgDeclarations" $ do
