@@ -307,10 +307,13 @@ pgResult = ss *> (pgResultSetOf <|> pgResultTable <|> pgResultSingle) where
 
 
 -- | Parser for an expression (as a default value for an argument).
--- WARNING: parsing default values requires ability to parse almost arbitraty expressions.
--- Here is a quick and dirty implementation of the parser.
-pgExpression :: Parser Text
-pgExpression = ss *> takeWhile (not . inClass ",)")
+pgExpression :: Parser ()
+pgExpression = ss *> (
+      pgFunctionInvocation  *> pure ()
+  <|> pgQualifiedIdentifier *> pure ()
+  <|> pgConstant            *> pure ()) where
+  pgConstant = pgString
+  pgFunctionInvocation = pgQualifiedIdentifier *> ss *> (withParentheses $ (withSpaces pgExpression) `sepBy` (char ','))
 
 
 -- | Parser for a single argument in a function declaration.
@@ -335,7 +338,7 @@ pgArgument = do
 
     pgOptional :: Parser Bool
     pgOptional = ss *> (
-          ((asciiCI "default" <|> string "=") *> ((not . T.null) <$> pgExpression))
+          ((asciiCI "default" <|> string "=") *> pgExpression *> pure True)
       <|> (peekChar >>= \mc -> do
               when (maybe False (not . inClass ",)") mc) $ fail "TODO"
               return False))
