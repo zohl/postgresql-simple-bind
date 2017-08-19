@@ -612,13 +612,17 @@ instance PGSql TPGFFailedIncoherentReturnTypes where
 
 data TestPGConstant
   = TPGCString TestPGString
+  | TPGCNumeric Double
   deriving (Show)
 
 instance Arbitrary TestPGConstant where
-  arbitrary = oneof [TPGCString <$> arbitrary]
+  arbitrary = oneof [
+      TPGCString <$> arbitrary
+    , TPGCNumeric <$> arbitrary]
 
 instance PGSql TestPGConstant where
   render (TPGCString s) = render s
+  render (TPGCNumeric c) = show c
 
 
 data TestPGExpression

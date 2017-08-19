@@ -70,7 +70,7 @@ import Control.Monad (when, liftM2)
 import Control.Monad.Catch (MonadThrow(..), throwM)
 import Data.Maybe (listToMaybe, catMaybes, fromMaybe)
 import Data.Monoid ((<>))
-import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal)
+import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal, double)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
 import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar')
 import Data.Default (def)
@@ -312,7 +312,9 @@ pgExpression = ss *> (
       pgFunctionInvocation  *> pure ()
   <|> pgQualifiedIdentifier *> pure ()
   <|> pgConstant            *> pure ()) where
-  pgConstant = pgString
+  pgConstant
+    =  pgString *> pure ()
+   <|> double   *> pure ()
   pgFunctionInvocation = pgQualifiedIdentifier *> ss *> (withParentheses $ (withSpaces pgExpression) `sepBy` (char ','))
 
 
