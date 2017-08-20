@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE GADTs #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Main where
@@ -609,7 +610,6 @@ instance PGSql TPGFFailedIncoherentReturnTypes where
   render (TPGFFailedIncoherentReturnTypes x) = render x
 
 
-
 data TestPGConstant
   = TPGCString TestPGString
   | TPGCNumeric Double
@@ -625,22 +625,46 @@ instance PGSql TestPGConstant where
   render (TPGCNumeric c) = show c
 
 
+data TestPGTypeCast
+  = TPGTCPrefix       TestPGType                TestPGString
+  | TPGTCSuffix       TestPGType                TestPGExpression
+  | TPGTCAs           TestPGType                TestPGExpression
+  | TPGTCFunctionCall TestPGQualifiedIdentifier TestPGExpression
+  deriving (Show)
+
+instance Arbitrary TestPGTypeCast where
+  arbitrary = oneof [
+      TPGTCPrefix       <$> arbitrary <*> arbitrary
+    , TPGTCSuffix       <$> arbitrary <*> arbitrary
+    , TPGTCAs           <$> arbitrary <*> arbitrary
+    , TPGTCFunctionCall <$> arbitrary <*> arbitrary]
+
+instance PGSql TestPGTypeCast where
+  render (TPGTCPrefix       t v) = (render t) ++ " " ++ (render v)
+  render (TPGTCSuffix       t v) = (render v) ++ "::" ++ (render t)
+  render (TPGTCAs           t v) = "cast (" ++ (render v) ++ " as " ++ (render t) ++ ")"
+  render (TPGTCFunctionCall t v) = (render t) ++ "(" ++ (render v) ++ ")"
+
+
 data TestPGExpression
   = TPGEConstant TestPGConstant
   | TPGEIdentifier TestPGQualifiedIdentifier
   | TPGEFunctionInvocation TestPGQualifiedIdentifier [TestPGExpression]
+  | TPGETypeCast TestPGTypeCast
   deriving (Show)
 
 instance Arbitrary TestPGExpression where
   arbitrary = sized $ \n -> oneof [
       TPGEConstant <$> arbitrary
     , TPGEIdentifier <$> arbitrary
-    , TPGEFunctionInvocation <$> arbitrary <*> (listOf $ resize (min 1 (n `div` 2)) arbitrary)]
+    , TPGEFunctionInvocation <$> arbitrary <*> (listOf $ resize (min 1 (n `div` 2)) arbitrary)
+    , TPGETypeCast <$> arbitrary]
 
 instance PGSql TestPGExpression where
   render (TPGEConstant c) = render c
   render (TPGEIdentifier n) = render n
   render (TPGEFunctionInvocation n args) = (render n) ++ "(" ++ (intercalate "," . map render $ args) ++ ")"
+  render (TPGETypeCast e) = render e
 
 
 
