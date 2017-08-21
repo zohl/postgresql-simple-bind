@@ -45,6 +45,7 @@ module Database.PostgreSQL.Simple.Bind.Parser (
   , pgColumnType
   , pgExactType
   , pgType
+  , pgOperator
 
   , pgResult
 
@@ -283,6 +284,17 @@ pgType = restructure
 
   restructure :: (Maybe String, (String, Maybe String)) -> PGType
   restructure (pgiSchema, (pgiName, pgtModifiers)) = let pgtIdentifier = PGIdentifier {..} in PGType {..}
+
+
+-- | Parser for an operator name.
+pgOperator :: Parser Text
+pgOperator = do
+  op <- takeWhile1 (inClass "+*/<>=~!@#%^&|`?-")
+  when (T.isInfixOf "--" op) $ fail "operator cannot contain `--`"
+  when (T.isInfixOf "/*" op) $ fail "operator cannot contain `/*`"
+  when (((`elem` ("+-"::String)) . T.last $ op) && (T.null . T.filter (`elem` ("~!@#%^&|`?"::String)) $ op))
+    $ fail "this operator cannot end in -,+"
+  return op
 
 
 -- | Parser for 'pg_get_function_result' output.

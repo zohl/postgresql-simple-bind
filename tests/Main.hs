@@ -60,11 +60,15 @@ arbitraryString' (c, c') = sized $ \case
 charASCII :: Gen Char
 charASCII = inClass [chr 32, '-', chr 127]
 
-charId :: (Gen Char, Gen Char)
-charId = (inClass "A-Za-z_", inClass "A-Za-z0-9_$")
+charOperator :: Gen Char
+charOperator = inClass "+*/<>=~!@#%^&|`?-"
 
-charTag :: (Gen Char, Gen Char)
-charTag = (inClass "A-Za-z_", inClass "A-Za-z0-9_")
+charId' :: (Gen Char, Gen Char)
+charId' = (inClass "A-Za-z_", inClass "A-Za-z0-9_$")
+
+charTag' :: (Gen Char, Gen Char)
+charTag' = (inClass "A-Za-z_", inClass "A-Za-z0-9_")
+
 
 arbitrarySumDecomposition :: Int -> Gen [Int]
 arbitrarySumDecomposition 0 = return []
@@ -74,7 +78,7 @@ arbitrarySumDecomposition n = choose (1, n) >>= \k -> (k:) <$> (arbitrarySumDeco
 data TestPGTag = TestPGTag String deriving (Show)
 
 instance Arbitrary TestPGTag where
-  arbitrary = TestPGTag <$> oneof [arbitraryString' charTag, return ""] where
+  arbitrary = TestPGTag <$> oneof [arbitraryString' charTag', return ""] where
 
 instance PGSql TestPGTag where
   render (TestPGTag s) = s
@@ -129,7 +133,7 @@ instance PGSql TestPGString where
 data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
 
 instance Arbitrary TestPGNormalIdentifier where
-  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId) `suchThat` (not . null)
+  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId') `suchThat` (not . null)
 
 instance PGSql TestPGNormalIdentifier where
   render (TestPGNormalIdentifier s) = s
@@ -315,6 +319,18 @@ instance PGTypeClass TestPGType where
     then Just ts'
     else Nothing where
       recordType = TestPGType "record"
+
+
+newtype TestPGOperator = TestPGOperator String deriving (Show)
+
+instance Arbitrary TestPGOperator where
+  arbitrary = TestPGOperator <$> arbitraryString charOperator `suchThat` (not . null)
+    `suchThat` (not . isInfixOf "--")
+    `suchThat` (not . isInfixOf "/*")
+    `suchThat` (\s -> (not . (`elem` ("+-"::String)) . last $ s)
+                   || (not . null . filter (`elem` ("~!@#%^&|`?"::String)) $ s))
+instance PGSql TestPGOperator where
+  render (TestPGOperator s) = s
 
 
 data TestPGResult
@@ -784,6 +800,10 @@ spec = do
 
   describe "pgType" $ do
     let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGType) pgType)
+    prop' "parsing works" . flip shouldSatisfy $ const True
+
+  describe "pgOperator" $ do
+    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGOperator) pgOperator)
     prop' "parsing works" . flip shouldSatisfy $ const True
 
   describe "pgResult" $ do
