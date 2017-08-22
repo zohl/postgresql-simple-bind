@@ -24,7 +24,7 @@ import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
 import Text.Heredoc (str)
-import Test.Hspec (Expectation, Spec, hspec, describe, it, shouldSatisfy, shouldBe)
+import Test.Hspec (Expectation, Spec, hspec, describe, it, shouldSatisfy, shouldBe, expectationFailure)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
 import qualified Data.Text as T
@@ -469,10 +469,10 @@ data TestPGFunction = TestPGFunction {
   , tpgfResult             :: Maybe TestPGResult
   , tpgfProperties         :: [String]
   , tpgfObsoleteProperties :: [String]
-  }
+  } deriving (Show)
 
-instance Show TestPGFunction where
-  show x = render x
+-- instance Show TestPGFunction where
+--   show x = render x
 
 instance Arbitrary TestPGFunction where
   arbitrary = do
@@ -687,20 +687,20 @@ instance PGSql TestPGExpression where
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
-  -> (Either String b -> Expectation)
+  -> (a -> Either String b -> Expectation)
   -> Spec
-propParser p name t = prop name property where
+propParser p name test = prop name property where
   property :: a -> Expectation
-  property x = t (parseOnly (unTagged p <* endOfInput) (T.pack . render $ x))
+  property x = test x (parseOnly (unTagged p <* endOfInput) (T.pack . render $ x))
 
 propParserLeft :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
   -> (String -> Expectation)
   -> Spec
-propParserLeft p name t = propParser p name $ \r -> either
-  (t . drop (length prefix))
-  (const $ r `shouldSatisfy` isLeft)
+propParserLeft p name test = propParser p name $ \x r -> either
+  (test . drop (length prefix))
+  (const . expectationFailure $ "expected parser failure at the following string:\n" ++ render x)
   r where
     prefix = either id (const "") $ parseOnly (fail "") ""
 
@@ -709,8 +709,8 @@ propParserRight :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   -> String
   -> (b -> Expectation)
   -> Spec
-propParserRight p name t = propParser p name $ \r -> either
-  (const $ r `shouldSatisfy` isRight)
+propParserRight p name t = propParser p name $ \x r -> either
+  (const . expectationFailure $ "unexpected parser failure at the following string:\n" ++ render x)
   t
   r
 
