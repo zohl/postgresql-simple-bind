@@ -230,17 +230,23 @@ instance PGSql TestPGColumnType where
   render (TestPGColumnType s) = s
 
 
-data TestPGExactType = TestPGExactType String String String String deriving (Show)
+data TestPGExactType = TestPGExactType {
+    tpgetName       :: String
+  , tpgetModifiers  :: [String]
+  , tpgetTimeZone   :: String
+  , tpgetDimensions :: String
+  } deriving (Show)
 
 instance Arbitrary TestPGExactType where
   arbitrary = do
-    name       <- arbitraryTypeName
-    modifier   <- arbitraryTypeModifier
-    timeZone   <- if (map toLower name) `elem` ["timestamp", "time"]
-                    then arbitraryTimeZone
-                    else return ""
-    dimensions <- arbitraryDimensions
-    return $ TestPGExactType name modifier timeZone dimensions where
+    tpgetName       <- arbitraryTypeName
+    tpgetModifiers  <- listOf arbitraryTypeModifier
+    tpgetTimeZone   <- if (map toLower tpgetName) `elem` ["timestamp", "time"]
+      then arbitraryTimeZone
+      else return ""
+
+    tpgetDimensions <- arbitraryDimensions
+    return $ TestPGExactType {..} where
 
       arbitraryTypeName = oneof [
           elements $
@@ -268,17 +274,8 @@ instance Arbitrary TestPGExactType where
         , (render <$> (arbitrary :: Gen TestPGIdentifier))]
 
       arbitraryTypeModifier = oneof [
-            return ""
-          , (render <$> (arbitrary :: Gen TestPGString))
-              `suchThat` (not . null)
-              `suchThat` (/= "\"\"")
-              >>= \s -> return . concat $ ["(", s, ")"]
-          , (arbitraryString charASCII)
-              `suchThat` (not . elem '(')
-              `suchThat` (not . elem ')')
-              `suchThat` (not . elem '\'')
-              `suchThat` (not . elem '"')
-              >>= \s -> return . concat $ ["(", s, ")"]]
+          render <$> (arbitrary :: Gen TestPGConstant)
+        , render <$> (arbitrary :: Gen TestPGQualifiedIdentifier)]
 
       arbitraryTimeZone = elements ["with time zone", "without time zone", ""]
 
@@ -292,15 +289,22 @@ instance Arbitrary TestPGExactType where
           ] >>= \d -> return . concat $ ["[", d, "]"]
 
   shrink (TestPGExactType n m t d) = [ TestPGExactType n m' t' d'
-    | m' <- shrinkString m
+    | m' <- if null m then [] else [[], m]
     , t' <- shrinkString t
     , d' <- shrinkString d
     , (m /= m' || t /= t' || d /= d')] where
        shrinkString s = if (null s) then [s] else ["", s]
 
 instance PGSql TestPGExactType where
-  render (TestPGExactType name modifier timeZone dimensions) = intercalate " " . filter (not . null) $
-    [name, modifier, timeZone, dimensions]
+  render (TestPGExactType {..})
+    = intercalate " "
+    . filter (not . null)
+    $ [ tpgetName
+      , if (not . null $ tpgetModifiers)
+          then "(" ++ (intercalate "," tpgetModifiers) ++ ")"
+          else ""
+      , tpgetTimeZone
+      , tpgetDimensions]
 
 
 data TestPGType = TestPGType String deriving (Show, Eq)
