@@ -73,7 +73,7 @@ import Data.Maybe (listToMaybe, catMaybes, fromMaybe)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal, double)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
-import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar')
+import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar', match)
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
@@ -164,6 +164,12 @@ pgString = anyChar >>= \case
    c    -> fail . show $ QuoteNotSupported c
 
 
+-- | Parser for a constant.
+pgConstant :: Parser Text
+pgConstant = pgString
+         <|> (fst <$> match double)
+
+
 -- | Parser for a non-quoted identifier.
 pgNormalIdentifier :: Parser Text
 pgNormalIdentifier = T.toLower <$> liftA2 T.cons
@@ -213,16 +219,16 @@ pgComment = pgLineComment <|> pgBlockComment
 
 
 -- | Parser for a column type.
-pgColumnType :: Parser (Text, Maybe Text)
-pgColumnType = ((,Nothing) . uncurry (<>) . ((<> ".") *** (<> "%type")))
+pgColumnType :: Parser (Text, [Text])
+pgColumnType = ((,[]) . uncurry (<>) . ((<> ".") *** (<> "%type")))
            <$> (qualified pgIdentifier <* asciiCI "%type")
 
 
 -- | Parser for an exact type.
-pgExactType :: Parser (Text, Maybe Text)
+pgExactType :: Parser (Text, [Text])
 pgExactType = do
   name       <- ss *> pgTypeName
-  modifier   <- ss *> pgTypeModifier
+  modifiers  <- ss *> pgTypeModifiers
   timeZone   <- if ((T.toLower name) `elem` ["time", "timestamp"])
                   then ss *> pgTimeZone
                   else pure Nothing
@@ -230,7 +236,7 @@ pgExactType = do
 
   return $ (
       T.concat [name, fromMaybe T.empty (T.cons ' ' <$> timeZone), dimensions]
-    , modifier
+    , modifiers
     ) where
     pgTypeName :: Parser Text
     pgTypeName = foldr1 (<|>) ((map asciiCIs multiWordIdentifiers) ++ [pgIdentifier])
@@ -255,10 +261,10 @@ pgExactType = do
       , ["minute"]
       , ["second"]])
 
-    pgTypeModifier :: Parser (Maybe Text)
-    pgTypeModifier = (withParentheses $ Just <$> pgTypeModifier')
-                 <|> pure Nothing where
-      pgTypeModifier' = pgString <|> takeWhile1 (/= ')')
+    pgTypeModifiers :: Parser [Text]
+    pgTypeModifiers = (withParentheses $
+                        (ss *> ((fst <$> match pgQualifiedIdentifier) <|> pgConstant)) `sepBy` (ss *> char ','))
+                  <|> pure []
 
     pgTimeZone :: Parser (Maybe Text)
     pgTimeZone = (Just <$> asciiCIs ["with", "time", "zone"])
@@ -282,7 +288,7 @@ pgType = restructure
        . second (T.unpack *** fmap T.unpack)
        <$> (optionallyQualified pgColumnType <|> optionallyQualified pgExactType) where
 
-  restructure :: (Maybe String, (String, Maybe String)) -> PGType
+  restructure :: (Maybe String, (String, [String])) -> PGType
   restructure (pgiSchema, (pgiName, pgtModifiers)) = let pgtIdentifier = PGIdentifier {..} in PGType {..}
 
 

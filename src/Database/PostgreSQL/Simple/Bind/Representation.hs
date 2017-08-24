@@ -55,11 +55,11 @@ class (Show t, Eq t) => PGTypeClass t where
 -- | Representation of a PostgreSQL type.
 data PGType = PGType {
     pgtIdentifier :: PGIdentifier
-  , pgtModifiers  :: Maybe String
+  , pgtModifiers  :: [String]
   } deriving (Show, Eq, Lift)
 
 instance IsString PGType where
-  fromString s = PGType { pgtIdentifier = fromString s, pgtModifiers = Nothing }
+  fromString s = PGType { pgtIdentifier = fromString s, pgtModifiers = [] }
 
 instance PGTypeClass PGType where
   mergeTypes ts ts' =
@@ -68,7 +68,7 @@ instance PGTypeClass PGType where
     else Nothing where
       recordType = PGType {
           pgtIdentifier = PGIdentifier {pgiSchema = Nothing, pgiName = "record"}
-        , pgtModifiers = Nothing
+        , pgtModifiers = []
         }
 
 
