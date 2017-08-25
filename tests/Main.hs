@@ -582,10 +582,7 @@ newtype TPGFCorrect = TPGFCorrect TestPGFunction deriving (Show)
 
 instance Arbitrary TPGFCorrect where
   arbitrary = TPGFCorrect <$> arbitrary
-    `suchThat` (\TestPGFunction {..} -> either
-                   (const False)
-                   (const True)
-                 . normalizeFunction $ (getArguments tpgfArgumentList, tpgfResult))
+    `suchThat` (\TestPGFunction {..} -> isRight . normalizeFunction $ (getArguments tpgfArgumentList, tpgfResult))
 
 instance PGSql TPGFCorrect where
   render (TPGFCorrect x) = render x
@@ -714,7 +711,7 @@ propParserRight :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   -> (b -> Expectation)
   -> Spec
 propParserRight p name t = propParser p name $ \x r -> either
-  (const . expectationFailure $ "unexpected parser failure at the following string:\n" ++ render x)
+  (\err -> expectationFailure $ "unexpected parser failure (" ++ err ++ ") at the following string:\n" ++ render x)
   t
   r
 
@@ -830,16 +827,16 @@ spec = do
     prop' "DefaultValueNotExpected"     (Proxy :: Proxy TPGALFailedCheckNotExpectedDefaults)
     prop' "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
 
-  describe "pgFunction" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TPGFCorrect) pgFunction)
-    prop' "parsing works" . flip shouldSatisfy $ const True
-
-  describe "pgFunction (incorrect declarations)" $ do
-    let prop' e t = propParserLeft (tagWith t pgFunction)
-          ("throws " ++ e)
-          . flip shouldSatisfy $ isPrefixOf e
-    prop' "NoReturnTypeInfo"      (Proxy :: Proxy TPGFFailedNoReturnTypeInfo)
-    prop' "IncoherentReturnTypes" (Proxy :: Proxy TPGFFailedIncoherentReturnTypes)
+--  describe "pgFunction" $ do
+--    let prop' = propParserRight (tagWith (Proxy :: Proxy TPGFCorrect) pgFunction)
+--    prop' "parsing works" . flip shouldSatisfy $ const True
+--
+--  describe "pgFunction (incorrect declarations)" $ do
+--    let prop' e t = propParserLeft (tagWith t pgFunction)
+--          ("throws " ++ e)
+--          . flip shouldSatisfy $ isPrefixOf e
+--    prop' "NoReturnTypeInfo"      (Proxy :: Proxy TPGFFailedNoReturnTypeInfo)
+--    prop' "IncoherentReturnTypes" (Proxy :: Proxy TPGFFailedIncoherentReturnTypes)
 
   describe "pgExpression" $ do
     let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGExpression) pgExpression)

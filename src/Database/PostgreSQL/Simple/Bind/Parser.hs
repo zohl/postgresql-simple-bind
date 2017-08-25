@@ -326,15 +326,36 @@ pgResult = ss *> (pgResultSetOf <|> pgResultTable <|> pgResultSingle) where
 
 -- | Parser for an expression (as a default value for an argument).
 pgExpression :: Parser ()
-pgExpression = ss *> (
-      pgFunctionInvocation  *> pure ()
-  <|> pgQualifiedIdentifier *> pure ()
-  <|> pgConstant            *> pure ()) where
-  pgConstant
-    =  pgString *> pure ()
-   <|> double   *> pure ()
-  pgFunctionInvocation = pgQualifiedIdentifier *> ss *> (withParentheses $ (withSpaces pgExpression) `sepBy` (char ','))
+pgExpression = pgExpression' True "" where
+  pgExpression' :: Bool -> String -> Parser ()
 
+  pgExpression' True [] = ss *> peekChar >>= \case
+    Nothing  -> pure ()
+    Just ')' -> pure ()
+    Just ']' -> pure ()
+    Just ',' -> pure ()
+    _        -> pgExpression' False []
+
+  pgExpression' _ s = (ss *> pgToken) >>= updateState s >>= pgExpression' True
+
+  updateState :: String -> Maybe Char -> Parser String
+  updateState s       Nothing    = pure s
+  updateState ('(':s) (Just ')') = pure s
+  updateState ('[':s) (Just ']') = pure s
+  updateState s       (Just c)   = if c `elem` (")]"::String)
+    then fail "unbalanced parentheses"
+    else pure (c:s)
+
+  pgToken
+    =   char '('              *> pure (Just '(')
+    <|> char ')'              *> pure (Just ')')
+    <|> char '['              *> pure (Just '[')
+    <|> char ']'              *> pure (Just ']')
+    <|> char ','              *> pure Nothing
+    <|> string "::"           *> pure Nothing
+    <|> pgOperator            *> pure Nothing
+    <|> pgQualifiedIdentifier *> pure Nothing
+    <|> pgConstant            *> pure Nothing
 
 -- | Parser for a single argument in a function declaration.
 pgArgument :: Parser PGArgument
