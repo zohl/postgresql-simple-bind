@@ -73,7 +73,7 @@ import Data.Maybe (listToMaybe, catMaybes, fromMaybe)
 import Data.Monoid ((<>))
 import Data.Attoparsec.Text (Parser, char, string, skipSpace, asciiCI, sepBy, decimal, double)
 import Data.Attoparsec.Text (takeWhile, takeWhile1, parseOnly, inClass, space, peekChar, satisfy, anyChar)
-import Data.Attoparsec.Text (isEndOfLine, endOfLine, peekChar', match)
+import Data.Attoparsec.Text (isEndOfLine, endOfLine, match)
 import Data.Default (def)
 import Data.Text (Text)
 import Prelude hiding (takeWhile, length)
@@ -334,6 +334,7 @@ pgExpression = pgExpression' True "" where
     Just ')' -> pure ()
     Just ']' -> pure ()
     Just ',' -> pure ()
+    Just ';' -> pure ()
     _        -> pgExpression' False []
 
   pgExpression' _ s = (ss *> pgToken) >>= updateState s >>= pgExpression' True
@@ -536,15 +537,7 @@ pgDeclarations = catMaybes <$> ((many (ss *> pgDeclaration)) <* ss) where
               <|> pgOtherClause *> ss *> char ';' *> pure Nothing
 
   pgOtherClause :: Parser ()
-  pgOtherClause = do
-    (s, c) <- liftA2 (,)
-      (takeWhile (not . inClass "'\"$;"))
-      peekChar'
-    if c == ';'
-      then pure ()
-      else if (inClass "'\"" c || T.null s || (not $ inClass "a-zA-Z0-9_" (T.last s)))
-           then pgString *> pgOtherClause
-           else anyChar  *> pgOtherClause
+  pgOtherClause = ss *> pgExpression
 
 
 -- | Takes PostgreSQL function signature and represent it as an algebraic data type.

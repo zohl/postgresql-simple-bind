@@ -684,7 +684,6 @@ instance PGSql TestPGExpression where
   render (TPGETypeCast e) = render e
 
 
-
 propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
   => Tagged a (Parser b)
   -> String
