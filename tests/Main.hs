@@ -714,6 +714,19 @@ propParserRight p name t = propParser p name $ \x r -> either
   t
   r
 
+propParsingWorks :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
+  => (Parser b)
+  -> Proxy a
+  -> Spec
+propParsingWorks p t = propParserRight (tagWith t p) "parsing works" (flip shouldSatisfy $ const True)
+
+propParsingFails :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
+  => (Parser b)
+  -> String
+  -> Proxy a
+  -> Spec
+propParsingFails p e t =  propParserLeft (tagWith t p) ("throws " ++ e) (flip shouldSatisfy $ isPrefixOf e)
+
 
 main :: IO ()
 main = hspec spec
@@ -729,6 +742,7 @@ testParser parser text result =
 spec :: Spec
 spec = do
   describe "pgTag" $ do
+    propParsingWorks pgTag (Proxy :: Proxy TestPGTag)
     let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGTag) pgTag)
     prop' "the first symbol is not a number" . flip shouldSatisfy $ \s -> T.null s || (not . isNumber . T.head $ s)
 
@@ -761,86 +775,64 @@ spec = do
       [(tag, name, test) | tag <- tags, (name, test) <- ps]
 
   describe "pgString" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGString) pgString)
-    prop' "parsing works" . flip shouldSatisfy $ const True
+    propParsingWorks pgString (Proxy :: Proxy TestPGString)
 
   describe "pgNormalIdentifier" $ do
+    propParsingWorks pgNormalIdentifier (Proxy :: Proxy TestPGNormalIdentifier)
     let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
     prop' "the first symbol is not '$'" . flip shouldSatisfy $ \s -> (T.head s) /= '$'
     prop' "stored in lowercase" $ \x -> x `shouldBe` (T.toLower x)
 
   describe "pgIdentifier" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGIdentifier) pgIdentifier)
-    prop' "parsing works" $ flip shouldSatisfy $ const True
+    propParsingWorks pgIdentifier (Proxy :: Proxy TestPGIdentifier)
 
   describe "pgQualifiedIdentifier" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGQualifiedIdentifier) pgQualifiedIdentifier)
-    prop' "parsing works" $ flip shouldSatisfy $ const True
+    propParsingWorks pgQualifiedIdentifier (Proxy :: Proxy TestPGQualifiedIdentifier)
 
   describe "pgLineComment" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGLineComment) pgLineComment)
-    prop' "starts with \"--\"" . flip shouldSatisfy $ T.isPrefixOf "--"
+    propParsingWorks pgLineComment (Proxy :: Proxy TestPGLineComment)
 
   describe "pgBlockComment" $ do
+    propParsingWorks pgBlockComment (Proxy :: Proxy TestPGBlockComment)
+
     let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGBlockComment) pgBlockComment)
     prop' "starts with /*" . flip shouldSatisfy $ T.isPrefixOf "/*"
     prop' "ends with */" . flip shouldSatisfy $ T.isSuffixOf "*/"
 
   describe "pgComment" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGComment) pgComment)
-    prop' "parsing works" . flip shouldSatisfy $ const True
+    propParsingWorks pgComment (Proxy :: Proxy TestPGComment)
 
   describe "pgColumnType" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGColumnType) pgColumnType)
-    prop' "parsing works" . flip shouldSatisfy $ const True
+    propParsingWorks pgColumnType (Proxy :: Proxy TestPGColumnType)
 
   describe "pgExactType" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGExactType) pgExactType)
-    prop' "parsing works" . flip shouldSatisfy $ const True
+    propParsingWorks pgExactType (Proxy :: Proxy TestPGExactType)
 
   describe "pgType" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGType) pgType)
-    prop' "parsing works" . flip shouldSatisfy $ const True
+    propParsingWorks pgType (Proxy :: Proxy TestPGType)
 
   describe "pgOperator" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGOperator) pgOperator)
-    prop' "parsing works" . flip shouldSatisfy $ const True
+    propParsingWorks pgOperator (Proxy :: Proxy TestPGOperator)
 
   describe "pgResult" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGResult) pgResult)
-    prop' "parsing works" . flip shouldSatisfy $ const True
+    propParsingWorks pgResult (Proxy :: Proxy TestPGResult)
 
   describe "pgArgument" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGArgument) pgArgument)
-    prop' "parsing works" . flip shouldSatisfy $ const True
+    propParsingWorks pgArgument (Proxy :: Proxy TestPGArgument)
 
   describe "pgArgumentList" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TPGALCorrect) (pgArgumentList True))
-    prop' "parsing works" . flip shouldSatisfy $ const True
-
-  describe "pgArgumentList (incorrect declarations)" $ do
-    let prop' e t = propParserLeft (tagWith t (pgArgumentList True))
-          ("throws " ++ e)
-          . flip shouldSatisfy $ isPrefixOf e
-    prop' "DefaultValueExpected"        (Proxy :: Proxy TPGALFailedCheckExpectedDefaults)
-    prop' "DefaultValueNotExpected"     (Proxy :: Proxy TPGALFailedCheckNotExpectedDefaults)
-    prop' "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
+    propParsingWorks (pgArgumentList True) (Proxy :: Proxy TPGALCorrect)
+    propParsingFails (pgArgumentList True) "DefaultValueExpected" (Proxy :: Proxy TPGALFailedCheckExpectedDefaults)
+    propParsingFails (pgArgumentList True) "DefaultValueNotExpected" (Proxy :: Proxy TPGALFailedCheckNotExpectedDefaults)
+    propParsingFails (pgArgumentList True) "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
 
 --  describe "pgFunction" $ do
---    let prop' = propParserRight (tagWith (Proxy :: Proxy TPGFCorrect) pgFunction)
---    prop' "parsing works" . flip shouldSatisfy $ const True
---
---  describe "pgFunction (incorrect declarations)" $ do
---    let prop' e t = propParserLeft (tagWith t pgFunction)
---          ("throws " ++ e)
---          . flip shouldSatisfy $ isPrefixOf e
---    prop' "NoReturnTypeInfo"      (Proxy :: Proxy TPGFFailedNoReturnTypeInfo)
---    prop' "IncoherentReturnTypes" (Proxy :: Proxy TPGFFailedIncoherentReturnTypes)
+--    propParsingWorks pgFunction (Proxy :: Proxy TPGFCorrect)
+--    propParsingFails pgFunction "NoReturnTypeInfo" (Proxy :: Proxy TPGFFailedNoReturnTypeInfo)
+--    propParsingFails pgFunction "IncoherentReturnTypes" (Proxy :: Proxy TPGFFailedIncoherentReturnTypes)
 
   describe "pgExpression" $ do
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGExpression) pgExpression)
-    prop' "parsing works" . flip shouldSatisfy $ const True
-
+    propParsingWorks pgExpression (Proxy :: Proxy TestPGExpression)
 
   describe "pgDeclarations" $ do
     let test t = testParser pgDeclarations t . Right
