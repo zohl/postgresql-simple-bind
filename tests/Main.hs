@@ -109,7 +109,7 @@ instance (KnownSymbol tag) => PGSql (TestPGDollarQuotedString tag) where
     in concat [s, "$", tagValue, "$"]
 
 
-data TestPGString = TestPGString String deriving (Show)
+newtype TestPGString = TestPGString String deriving (Show, Eq)
 
 instance Arbitrary TestPGString where
   arbitrary = TestPGString <$> oneof [
@@ -150,7 +150,7 @@ instance PGSql TestPGIdentifier where
   render (TestPGIdentifier s) = s
 
 
-data TestPGQualifiedIdentifier = TestPGQualifiedIdentifier PGIdentifier deriving (Show)
+newtype TestPGQualifiedIdentifier = TestPGQualifiedIdentifier PGIdentifier deriving (Show, Eq)
 
 instance Arbitrary TestPGQualifiedIdentifier where
   arbitrary = do
@@ -372,7 +372,7 @@ data TestPGArgument = TestPGArgument {
   , tpgaName            :: Maybe TestPGIdentifier
   , tpgaType            :: TestPGType
   , tpgaDefaultNotation :: String
-  , tpgaDefaultValue    :: Maybe String
+  , tpgaDefaultValue    :: Maybe TestPGExpression
   } deriving (Show, Eq)
 
 instance Arbitrary TestPGArgument where
@@ -381,7 +381,7 @@ instance Arbitrary TestPGArgument where
     tpgaName            <- arbitrary
     tpgaType            <- arbitrary
     tpgaDefaultNotation <- elements ["=", "default"]
-    tpgaDefaultValue    <- elements [Nothing, Just "expression"] -- TODO
+    tpgaDefaultValue    <- arbitrary
     return TestPGArgument {..}
 
 instance PGSql TestPGArgument where
@@ -389,7 +389,7 @@ instance PGSql TestPGArgument where
       ((++ " ") . show) <$> tpgaMode
     , (++ " ") . render <$> tpgaName
     , Just . render $ tpgaType
-    , (' ':)  . (tpgaDefaultNotation ++) . (' ':) <$> tpgaDefaultValue]
+    , (' ':)  . (tpgaDefaultNotation ++) . (' ':) . render <$> tpgaDefaultValue]
 
 instance PGArgumentClass TestPGArgument TestPGType where
   argumentMode     = fromMaybe In . tpgaMode
@@ -630,7 +630,7 @@ instance PGSql TPGFFailedIncoherentReturnTypes where
 data TestPGConstant
   = TPGCString TestPGString
   | TPGCNumeric Double
-  deriving (Show)
+  deriving (Show, Eq)
 
 instance Arbitrary TestPGConstant where
   arbitrary = oneof [
@@ -647,7 +647,7 @@ data TestPGTypeCast
   | TPGTCSuffix       TestPGType                TestPGExpression
   | TPGTCAs           TestPGType                TestPGExpression
   | TPGTCFunctionCall TestPGQualifiedIdentifier TestPGExpression
-  deriving (Show)
+  deriving (Show, Eq)
 
 instance Arbitrary TestPGTypeCast where
   arbitrary = oneof [
@@ -668,7 +668,7 @@ data TestPGExpression
   | TPGEIdentifier TestPGQualifiedIdentifier
   | TPGEFunctionInvocation TestPGQualifiedIdentifier [TestPGExpression]
   | TPGETypeCast TestPGTypeCast
-  deriving (Show)
+  deriving (Show, Eq)
 
 instance Arbitrary TestPGExpression where
   arbitrary = sized $ \n -> oneof [
