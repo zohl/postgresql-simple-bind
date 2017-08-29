@@ -7,6 +7,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Main where
@@ -31,6 +32,14 @@ import qualified Data.Text as T
 import qualified Data.Bifunctor as B(first)
 
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolVal)
+
+import System.Directory (listDirectory)
+import System.FilePath.Posix (dropExtensions, (</>), (<.>))
+import Data.Map.Strict (Map, (!))
+import qualified Data.Map.Strict as Map
+
+import qualified Data.Text.IO as T
+
 
 proxyArbitrary :: (Arbitrary a) => Proxy a -> Gen a
 proxyArbitrary _ = arbitrary
@@ -475,9 +484,6 @@ data TestPGFunction = TestPGFunction {
   , tpgfObsoleteProperties :: [String]
   } deriving (Show)
 
--- instance Show TestPGFunction where
---   show x = render x
-
 instance Arbitrary TestPGFunction where
   arbitrary = do
     tpgfOrReplace          <- arbitrary
@@ -728,8 +734,17 @@ propParsingFails :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
 propParsingFails p e t =  propParserLeft (tagWith t p) ("throws " ++ e) (flip shouldSatisfy $ isPrefixOf e)
 
 
+
+samplesDir :: FilePath
+samplesDir = "tests/samples"
+
+loadSample :: FilePath -> IO Text
+loadSample fn = T.readFile (samplesDir </> fn <.> "sql")
+
 main :: IO ()
-main = hspec spec
+main = do
+  samples <- listDirectory samplesDir >>= fmap Map.fromList . mapM (\fn -> (fn,) <$> (loadSample fn)) . map dropExtensions
+  hspec (spec samples)
 
 testParser :: (Show a, Eq a) => Parser a -> Text -> Either ParserException a -> IO ()
 testParser parser text result =
@@ -739,8 +754,8 @@ testParser parser text result =
     prefix = either id (const "") $ parseOnly (fail "") ""
 
 
-spec :: Spec
-spec = do
+spec :: Map FilePath Text -> Spec
+spec samples = do
   describe "pgTag" $ do
     propParsingWorks pgTag (Proxy :: Proxy TestPGTag)
     let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGTag) pgTag)
@@ -836,45 +851,22 @@ spec = do
 
   describe "pgDeclarations" $ do
     let test t = testParser pgDeclarations t . Right
-    let f = PGFunction {
-            pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }
-          , pgfArguments = []
-          , pgfResult = PGSingle ["bigint"]
-          }
+    let functionTemplate = PGFunction {
+          pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "" }
+        , pgfArguments = []
+        , pgfResult = PGSingle ["bigint"]}
+
+    let foo = functionTemplate {pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "foo" }}
+    let bar = functionTemplate {pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "bar" }}
 
     it "works with single function declaration" $ do
-      test
-        "create function foo() returns bigint as 'select 42::bigint';"
-        [f]
+      test (samples ! "declarations-0001") [foo]
 
     it "works with multiple function declaration" $ do
-      test
-        [str|create function foo() returns bigint as 'select 42::bigint';
-            |create function bar() returns bigint as 'select 42::bigint';
-            |]
-        [f, f {pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "bar" }}]
+      test (samples ! "declarations-0002") [foo, bar]
 
     it "ignores comments" $ do
-      test
-        [str| -- foo
-            |create function foo() returns bigint as 'select 42::bigint';
-            |
-            | /* bar
-            |  *
-            |  */
-            |create function bar() returns bigint as 'select 42::bigint';
-            |]
-        [f, f {pgfIdentifier = PGIdentifier { pgiSchema = Nothing, pgiName = "bar" }}]
+      test (samples ! "declarations-0003") [foo, bar]
 
     it "ignores other clauses" $ do
-      test
-        [str|create table t (f_id bigint, f_body varchar);
-            |insert into t (f_id, f_body) values (1, 'create function foo() bigint as $$ select 1; $$;');
-            |insert into t (f_id, f_body) values (2, 'create function bar() bigint as $$ select 2; $$;');
-            |commit;
-            |
-            |perform 'create function baz() returns void as $$ select 3; $$';
-            |perform '; create function qux() returns void as $$ select 3; $$; ';
-            |
-            |]
-        []
+      test (samples ! "declarations-0004") []
