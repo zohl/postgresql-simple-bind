@@ -17,14 +17,12 @@ import Data.List (isPrefixOf, isInfixOf, isSuffixOf, intercalate, tails)
 import Data.Maybe (listToMaybe, fromMaybe, catMaybes, isJust, isNothing)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (Tagged(..), tagWith)
-import Data.Either (isLeft, isRight)
+import Data.Either (isRight)
 import Control.Monad (liftM2)
 import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
-import Data.Default (def)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgument(..), PGArgumentMode(..), PGColumn(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
-import Text.Heredoc (str)
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
 import Test.Hspec (Expectation, Spec, hspec, describe, it, shouldSatisfy, shouldBe, expectationFailure)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
@@ -84,7 +82,7 @@ arbitrarySumDecomposition 0 = return []
 arbitrarySumDecomposition n = choose (1, n) >>= \k -> (k:) <$> (arbitrarySumDecomposition (n-k))
 
 
-data TestPGTag = TestPGTag String deriving (Show)
+newtype TestPGTag = TestPGTag String deriving (Show)
 
 instance Arbitrary TestPGTag where
   arbitrary = TestPGTag <$> oneof [arbitraryString' charTag', return ""] where
@@ -93,7 +91,8 @@ instance PGSql TestPGTag where
   render (TestPGTag s) = s
 
 
-data TestPGQuotedString (q :: Symbol) = TestPGQuotedString String deriving (Show)
+
+newtype TestPGQuotedString (q :: Symbol) = TestPGQuotedString String deriving (Show)
 
 instance (KnownSymbol q) => Arbitrary (TestPGQuotedString q) where
   arbitrary = TestPGQuotedString . concatMap doubleQuote <$> arbitraryString charASCII where
@@ -103,7 +102,7 @@ instance (KnownSymbol q) => PGSql (TestPGQuotedString q) where
   render (TestPGQuotedString s) = s ++ (symbolVal (Proxy :: Proxy q))
 
 
-data TestPGDollarQuotedString (tag :: Symbol) = TestPGDollarQuotedString String deriving (Show)
+newtype TestPGDollarQuotedString (tag :: Symbol) = TestPGDollarQuotedString String deriving (Show)
 
 instance (KnownSymbol tag) => Arbitrary (TestPGDollarQuotedString tag) where
   arbitrary = let
@@ -139,7 +138,7 @@ instance PGSql TestPGString where
   render (TestPGString s) = s
 
 
-data TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
+newtype TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
 
 instance Arbitrary TestPGNormalIdentifier where
   arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId') `suchThat` (not . null)
@@ -148,7 +147,7 @@ instance PGSql TestPGNormalIdentifier where
   render (TestPGNormalIdentifier s) = s
 
 
-data TestPGIdentifier = TestPGIdentifier String deriving (Show, Eq)
+newtype TestPGIdentifier = TestPGIdentifier String deriving (Show, Eq)
 
 instance Arbitrary TestPGIdentifier where
   arbitrary = TestPGIdentifier <$> oneof [
@@ -171,7 +170,7 @@ instance PGSql TestPGQualifiedIdentifier where
   render (TestPGQualifiedIdentifier PGIdentifier {..}) = maybe pgiName (++ ('.':pgiName)) pgiSchema
 
 
-data TestPGLineComment = TestPGLineComment String deriving (Show)
+newtype TestPGLineComment = TestPGLineComment String deriving (Show)
 
 instance Arbitrary TestPGLineComment where
   arbitrary = TestPGLineComment <$> arbitraryString charASCII
@@ -216,7 +215,7 @@ instance PGSql TestPGBlockComment where
   render (TestPGBlockCommentElement x) = x
 
 
-data TestPGComment = TestPGComment String deriving (Show)
+newtype TestPGComment = TestPGComment String deriving (Show)
 
 instance Arbitrary TestPGComment where
   arbitrary = TestPGComment <$> oneof [
@@ -227,7 +226,7 @@ instance PGSql TestPGComment where
   render (TestPGComment s) = s
 
 
-data TestPGColumnType = TestPGColumnType String deriving (Show)
+newtype TestPGColumnType = TestPGColumnType String deriving (Show)
 
 instance Arbitrary TestPGColumnType where
   arbitrary = TestPGColumnType <$> do
@@ -316,7 +315,7 @@ instance PGSql TestPGExactType where
       , tpgetDimensions]
 
 
-data TestPGType = TestPGType String deriving (Show, Eq)
+newtype TestPGType = TestPGType String deriving (Show, Eq)
 
 instance Arbitrary TestPGType where
   arbitrary = TestPGType <$> oneof [
@@ -406,7 +405,7 @@ instance PGArgumentClass TestPGArgument TestPGType where
   argumentType     = tpgaType
 
 
-data TestPGArgumentList = TestPGArgumentList { getArguments :: [TestPGArgument] } deriving (Show)
+newtype TestPGArgumentList = TestPGArgumentList { getArguments :: [TestPGArgument] } deriving (Show)
 
 instance Arbitrary TestPGArgumentList where
   arbitrary = TestPGArgumentList <$> (listOf arbitrary)
