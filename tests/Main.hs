@@ -12,74 +12,27 @@
 
 module Main where
 
-import Data.Char (chr, isNumber, toLower)
-import Data.List (isPrefixOf, isInfixOf, isSuffixOf, intercalate, tails)
+import Data.Char (isNumber, toLower)
+import Data.List (isInfixOf, isSuffixOf, intercalate, tails)
 import Data.Maybe (listToMaybe, fromMaybe, catMaybes, isJust, isNothing)
 import Data.Proxy (Proxy(..))
-import Data.Tagged (Tagged(..), tagWith)
+import Data.Tagged (tagWith)
 import Data.Either (isRight)
 import Control.Monad (liftM2)
-import Data.Attoparsec.Text (Parser, parseOnly, endOfInput)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
-import Test.Hspec (Expectation, Spec, hspec, describe, it, shouldSatisfy, shouldBe, expectationFailure)
-import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
+import Test.Hspec (Spec, hspec, describe, it, shouldSatisfy, shouldBe)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
 import qualified Data.Text as T
-import qualified Data.Bifunctor as B(first)
-
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolVal)
-
 import System.Directory (listDirectory)
-import System.FilePath.Posix (dropExtensions, (</>), (<.>))
+import System.FilePath.Posix (dropExtensions)
 import Data.Map.Strict (Map, (!))
 import qualified Data.Map.Strict as Map
+import Test.Common (PGSql(..), proxyArbitrary, proxyMap, arbitraryString, arbitraryString', charASCII, charOperator, charId', charTag', arbitrarySumDecomposition)
+import Test.Utils (propParserRight, propParsingWorks, propParsingFails, testParser, loadDirectory)
 
-import qualified Data.Text.IO as T
-
-
-proxyArbitrary :: (Arbitrary a) => Proxy a -> Gen a
-proxyArbitrary _ = arbitrary
-
-proxyMap :: Proxy (f :: Symbol -> *) -> Proxy a -> Proxy (f a)
-proxyMap _ _ = Proxy
-
-
-class PGSql a where
-  render :: a -> String
-
-inClass :: String -> Gen Char
-inClass = oneof . inClass' where
-  inClass' (x:'-':y:xs) = (choose (x, y)):(inClass' xs)
-  inClass' (x:xs)       = (return x):(inClass' xs)
-  inClass' []           = []
-
-arbitraryString :: Gen Char -> Gen String
-arbitraryString c = sized $ \n -> sequence . replicate n $ c
-
-arbitraryString' :: (Gen Char, Gen Char) -> Gen String
-arbitraryString' (c, c') = sized $ \case
-  0 -> return []
-  1 -> pure <$> c
-  n -> liftM2 (:) c (resize (n-1) $ arbitraryString c')
-
-charASCII :: Gen Char
-charASCII = inClass [chr 32, '-', chr 127]
-
-charOperator :: Gen Char
-charOperator = inClass "+*/<>=~!@#%^&|`?-"
-
-charId' :: (Gen Char, Gen Char)
-charId' = (inClass "A-Za-z_", inClass "A-Za-z0-9_$")
-
-charTag' :: (Gen Char, Gen Char)
-charTag' = (inClass "A-Za-z_", inClass "A-Za-z0-9_")
-
-
-arbitrarySumDecomposition :: Int -> Gen [Int]
-arbitrarySumDecomposition 0 = return []
-arbitrarySumDecomposition n = choose (1, n) >>= \k -> (k:) <$> (arbitrarySumDecomposition (n-k))
 
 
 newtype TestPGTag = TestPGTag String deriving (Show)
@@ -89,7 +42,6 @@ instance Arbitrary TestPGTag where
 
 instance PGSql TestPGTag where
   render (TestPGTag s) = s
-
 
 
 newtype TestPGQuotedString (q :: Symbol) = TestPGQuotedString String deriving (Show)
@@ -689,68 +641,10 @@ instance PGSql TestPGExpression where
   render (TPGETypeCast e) = render e
 
 
-propParser :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
-  => Tagged a (Parser b)
-  -> String
-  -> (a -> Either String b -> Expectation)
-  -> Spec
-propParser p name test = prop name property where
-  property :: a -> Expectation
-  property x = test x (parseOnly (unTagged p <* endOfInput) (T.pack . render $ x))
-
-propParserLeft :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
-  => Tagged a (Parser b)
-  -> String
-  -> (String -> Expectation)
-  -> Spec
-propParserLeft p name test = propParser p name $ \x r -> either
-  (test . drop (length prefix))
-  (const . expectationFailure $ "expected parser failure at the following string:\n" ++ render x)
-  r where
-    prefix = either id (const "") $ parseOnly (fail "") ""
-
-propParserRight :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
-  => Tagged a (Parser b)
-  -> String
-  -> (b -> Expectation)
-  -> Spec
-propParserRight p name t = propParser p name $ \x r -> either
-  (\err -> expectationFailure $ "unexpected parser failure (" ++ err ++ ") at the following string:\n" ++ render x)
-  t
-  r
-
-propParsingWorks :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
-  => (Parser b)
-  -> Proxy a
-  -> Spec
-propParsingWorks p t = propParserRight (tagWith t p) "parsing works" (flip shouldSatisfy $ const True)
-
-propParsingFails :: forall a b. (PGSql a, Arbitrary a, Show a, Show b)
-  => (Parser b)
-  -> String
-  -> Proxy a
-  -> Spec
-propParsingFails p e t =  propParserLeft (tagWith t p) ("throws " ++ e) (flip shouldSatisfy $ isPrefixOf e)
-
-
-
-samplesDir :: FilePath
-samplesDir = "tests/samples"
-
-loadSample :: FilePath -> IO Text
-loadSample fn = T.readFile (samplesDir </> fn <.> "sql")
-
 main :: IO ()
 main = do
-  samples <- listDirectory samplesDir >>= fmap Map.fromList . mapM (\fn -> (fn,) <$> (loadSample fn)) . map dropExtensions
+  samples <- loadDirectory "tests/samples"
   hspec (spec samples)
-
-testParser :: (Show a, Eq a) => Parser a -> Text -> Either ParserException a -> IO ()
-testParser parser text result =
-  (parseOnly (parser <* endOfInput) text)
-  `shouldBe`
-  (B.first ((prefix ++) . show) result) where
-    prefix = either id (const "") $ parseOnly (fail "") ""
 
 
 spec :: Map FilePath Text -> Spec
