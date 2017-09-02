@@ -1,14 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TupleSections #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Test.PGString (
     TestPGTag(..)
@@ -20,26 +13,18 @@ module Test.PGString (
   ) where
 
 
-import Data.Char (isNumber, toLower)
-import Data.List (isInfixOf, isSuffixOf, intercalate, tails)
-import Data.Maybe (listToMaybe, fromMaybe, catMaybes, isJust, isNothing)
+import Data.Char (isNumber)
+import Data.List (isInfixOf, isSuffixOf)
 import Data.Proxy (Proxy(..))
 import Data.Tagged (tagWith)
-import Data.Either (isRight)
-import Control.Monad (liftM2)
-import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
-import Test.Hspec (Spec, hspec, describe, it, shouldSatisfy, shouldBe)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
+import Test.Hspec (Spec, shouldSatisfy, describe)
+import Test.QuickCheck (Gen, Arbitrary(..), oneof, suchThat)
 import qualified Data.Text as T
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolVal)
-import System.Directory (listDirectory)
-import System.FilePath.Posix (dropExtensions)
-import Data.Map.Strict (Map, (!))
-import qualified Data.Map.Strict as Map
-import Test.Common (PGSql(..), proxyArbitrary, proxyMap, arbitraryString, arbitraryString', charASCII, charOperator, charId', charTag', arbitrarySumDecomposition)
-import Test.Utils (propParserRight, propParsingWorks, propParsingFails, testParser, loadDirectory)
+import Test.Common (PGSql(..), proxyArbitrary, proxyMap, arbitraryString, arbitraryString', charASCII, charTag')
+import Test.Utils (propParserRight, propParsingWorks)
+
 
 
 newtype TestPGTag = TestPGTag String deriving (Show)

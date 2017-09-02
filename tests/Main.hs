@@ -22,47 +22,18 @@ import Control.Monad (liftM2)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
-import Test.Hspec (Spec, hspec, describe, it, shouldSatisfy, shouldBe)
+import Test.Hspec (Spec, hspec, describe, it, shouldSatisfy)
 import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
 import qualified Data.Text as T
 import Data.Map.Strict (Map, (!))
-import Test.Common (PGSql(..), arbitraryString, arbitraryString', charASCII, charOperator, charId', arbitrarySumDecomposition)
+import Test.Common (PGSql(..), arbitraryString, charASCII, charOperator, arbitrarySumDecomposition)
 import Test.Utils (propParserRight, propParsingWorks, propParsingFails, testParser, loadDirectory)
 
 import Test.PGString (TestPGQuotedString(..), TestPGString(..))
 import qualified Test.PGString as PGString
 
-
-newtype TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
-
-instance Arbitrary TestPGNormalIdentifier where
-  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId') `suchThat` (not . null)
-
-instance PGSql TestPGNormalIdentifier where
-  render (TestPGNormalIdentifier s) = s
-
-
-newtype TestPGIdentifier = TestPGIdentifier String deriving (Show, Eq)
-
-instance Arbitrary TestPGIdentifier where
-  arbitrary = TestPGIdentifier <$> oneof [
-      render <$> (arbitrary :: Gen TestPGNormalIdentifier)
-    , (('"':) . render <$> (arbitrary :: Gen (TestPGQuotedString "\""))) `suchThat` ((> 2) . length)]
-
-instance PGSql TestPGIdentifier where
-  render (TestPGIdentifier s) = s
-
-
-newtype TestPGQualifiedIdentifier = TestPGQualifiedIdentifier PGIdentifier deriving (Show, Eq)
-
-instance Arbitrary TestPGQualifiedIdentifier where
-  arbitrary = do
-    pgiSchema <- oneof [return Nothing, Just . render <$> (arbitrary :: Gen TestPGIdentifier)]
-    pgiName   <- render <$> (arbitrary :: Gen TestPGIdentifier)
-    return $ TestPGQualifiedIdentifier PGIdentifier {..}
-
-instance PGSql TestPGQualifiedIdentifier where
-  render (TestPGQualifiedIdentifier PGIdentifier {..}) = maybe pgiName (++ ('.':pgiName)) pgiSchema
+import Test.PGIdentifier (TestPGNormalIdentifier(..), TestPGQualifiedIdentifier(..), TestPGIdentifier(..))
+import qualified Test.PGIdentifier as PGIdentifier
 
 
 newtype TestPGLineComment = TestPGLineComment String deriving (Show)
@@ -593,18 +564,7 @@ main = do
 spec :: Map FilePath Text -> Spec
 spec samples = do
   PGString.spec
-
-  describe "pgNormalIdentifier" $ do
-    propParsingWorks pgNormalIdentifier (Proxy :: Proxy TestPGNormalIdentifier)
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGNormalIdentifier) pgNormalIdentifier)
-    prop' "the first symbol is not '$'" . flip shouldSatisfy $ \s -> (T.head s) /= '$'
-    prop' "stored in lowercase" $ \x -> x `shouldBe` (T.toLower x)
-
-  describe "pgIdentifier" $ do
-    propParsingWorks pgIdentifier (Proxy :: Proxy TestPGIdentifier)
-
-  describe "pgQualifiedIdentifier" $ do
-    propParsingWorks pgQualifiedIdentifier (Proxy :: Proxy TestPGQualifiedIdentifier)
+  PGIdentifier.spec
 
   describe "pgLineComment" $ do
     propParsingWorks pgLineComment (Proxy :: Proxy TestPGLineComment)
