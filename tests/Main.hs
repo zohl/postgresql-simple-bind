@@ -13,21 +13,21 @@
 module Main where
 
 import Data.Char (toLower)
-import Data.List (isInfixOf, isSuffixOf, intercalate, tails)
-import Data.Maybe (listToMaybe, fromMaybe, catMaybes, isJust, isNothing)
+import Data.List (isInfixOf, intercalate, tails)
+import Data.Maybe (fromMaybe, catMaybes, isJust, isNothing)
 import Data.Proxy (Proxy(..))
-import Data.Tagged (tagWith)
+
 import Data.Either (isRight)
 import Control.Monad (liftM2)
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
-import Test.Hspec (Spec, hspec, describe, it, shouldSatisfy)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, frequency, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
-import qualified Data.Text as T
+import Test.Hspec (Spec, hspec, describe, it)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
+
 import Data.Map.Strict (Map, (!))
-import Test.Common (PGSql(..), arbitraryString, charASCII, charOperator, arbitrarySumDecomposition)
-import Test.Utils (propParserRight, propParsingWorks, propParsingFails, testParser, loadDirectory)
+import Test.Common (PGSql(..), arbitraryString, charOperator)
+import Test.Utils (propParsingWorks, propParsingFails, testParser, loadDirectory)
 
 import Test.PGString (TestPGQuotedString(..), TestPGString(..))
 import qualified Test.PGString as PGString
@@ -35,61 +35,7 @@ import qualified Test.PGString as PGString
 import Test.PGIdentifier (TestPGNormalIdentifier(..), TestPGQualifiedIdentifier(..), TestPGIdentifier(..))
 import qualified Test.PGIdentifier as PGIdentifier
 
-
-newtype TestPGLineComment = TestPGLineComment String deriving (Show)
-
-instance Arbitrary TestPGLineComment where
-  arbitrary = TestPGLineComment <$> arbitraryString charASCII
-
-instance PGSql TestPGLineComment where
-  render (TestPGLineComment s) = "--" ++ s
-
-
-data TestPGBlockComment
-  = TestPGBlockCommentGroup [TestPGBlockComment]
-  | TestPGBlockCommentElement String
-  deriving (Show, Eq)
-
-instance Arbitrary TestPGBlockComment where
-  arbitrary = TestPGBlockCommentGroup <$> (sized $ \n -> arbitrarySumDecomposition n
-    >>= mapM mkElement . zip (map ((== 0) . (`mod` 2)) [(1::Int)..])) where
-      mkElement (isGroup, s) = resize s $ if isGroup
-        then (arbitrary :: Gen TestPGBlockComment)
-        else (TestPGBlockCommentElement <$> (arbitraryString $ frequency [(15, charASCII), (1, return '\n')])
-                    `suchThat` (not . isInfixOf "/*")
-                    `suchThat` (not . isInfixOf "*/")
-                    `suchThat` (not . isSuffixOf "/")
-                    `suchThat` (not . isSuffixOf "*"))
-
-
-  shrink (TestPGBlockCommentGroup xs) = (concatMap shrink . filter isGroup $ xs)
-                                     ++ (if (xs' /= xs)
-                                         then [TestPGBlockCommentGroup xs']
-                                         else []) where
-    xs' = map (\x -> fromMaybe x . listToMaybe . shrink $ x) xs
-
-    isGroup :: TestPGBlockComment -> Bool
-    isGroup (TestPGBlockCommentGroup _) = True
-    isGroup _                           = False
-
-  shrink (TestPGBlockCommentElement s) = if length s > 3
-    then [TestPGBlockCommentElement (head s:' ':last s:[])]
-    else []
-
-instance PGSql TestPGBlockComment where
-  render (TestPGBlockCommentGroup xs) = "/*" ++ (concatMap render xs) ++ "*/"
-  render (TestPGBlockCommentElement x) = x
-
-
-newtype TestPGComment = TestPGComment String deriving (Show)
-
-instance Arbitrary TestPGComment where
-  arbitrary = TestPGComment <$> oneof [
-      render <$> (arbitrary :: Gen TestPGLineComment)
-    , render <$> (arbitrary :: Gen TestPGBlockComment)]
-
-instance PGSql TestPGComment where
-  render (TestPGComment s) = s
+import qualified Test.PGComment as PGComment
 
 
 newtype TestPGColumnType = TestPGColumnType String deriving (Show)
@@ -565,19 +511,7 @@ spec :: Map FilePath Text -> Spec
 spec samples = do
   PGString.spec
   PGIdentifier.spec
-
-  describe "pgLineComment" $ do
-    propParsingWorks pgLineComment (Proxy :: Proxy TestPGLineComment)
-
-  describe "pgBlockComment" $ do
-    propParsingWorks pgBlockComment (Proxy :: Proxy TestPGBlockComment)
-
-    let prop' = propParserRight (tagWith (Proxy :: Proxy TestPGBlockComment) pgBlockComment)
-    prop' "starts with /*" . flip shouldSatisfy $ T.isPrefixOf "/*"
-    prop' "ends with */" . flip shouldSatisfy $ T.isSuffixOf "*/"
-
-  describe "pgComment" $ do
-    propParsingWorks pgComment (Proxy :: Proxy TestPGComment)
+  PGComment.spec
 
   describe "pgColumnType" $ do
     propParsingWorks pgColumnType (Proxy :: Proxy TestPGColumnType)
