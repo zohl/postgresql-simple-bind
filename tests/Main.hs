@@ -16,7 +16,6 @@ import Data.Char (toLower)
 import Data.List (isInfixOf, intercalate, tails)
 import Data.Maybe (fromMaybe, catMaybes, isJust, isNothing)
 import Data.Proxy (Proxy(..))
-
 import Data.Either (isRight)
 import Control.Monad (liftM2)
 import Data.Text (Text)
@@ -24,7 +23,6 @@ import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
 import Test.Hspec (Spec, hspec, describe, it)
 import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
-
 import Data.Map.Strict (Map, (!))
 import Test.Common (PGSql(..), arbitraryString, charOperator)
 import Test.Utils (propParsingWorks, propParsingFails, testParser, loadDirectory)
@@ -36,6 +34,10 @@ import Test.PGIdentifier (TestPGNormalIdentifier(..), TestPGQualifiedIdentifier(
 import qualified Test.PGIdentifier as PGIdentifier
 
 import qualified Test.PGComment as PGComment
+
+import Test.PGConstant (TestPGConstant(..))
+import qualified Test.PGConstant as PGConstant
+
 
 
 newtype TestPGColumnType = TestPGColumnType String deriving (Show)
@@ -444,21 +446,6 @@ instance PGSql TPGFFailedIncoherentReturnTypes where
   render (TPGFFailedIncoherentReturnTypes x) = render x
 
 
-data TestPGConstant
-  = TPGCString TestPGString
-  | TPGCNumeric Double
-  deriving (Show, Eq)
-
-instance Arbitrary TestPGConstant where
-  arbitrary = oneof [
-      TPGCString <$> arbitrary
-    , TPGCNumeric <$> arbitrary]
-
-instance PGSql TestPGConstant where
-  render (TPGCString s) = render s
-  render (TPGCNumeric c) = show c
-
-
 data TestPGTypeCast
   = TPGTCPrefix       TestPGType                TestPGString
   | TPGTCSuffix       TestPGType                TestPGExpression
@@ -512,6 +499,7 @@ spec samples = do
   PGString.spec
   PGIdentifier.spec
   PGComment.spec
+  PGConstant.spec
 
   describe "pgColumnType" $ do
     propParsingWorks pgColumnType (Proxy :: Proxy TestPGColumnType)
