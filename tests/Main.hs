@@ -13,7 +13,7 @@
 module Main where
 
 
-import Data.List (isInfixOf, intercalate, tails)
+import Data.List (intercalate, tails)
 import Data.Maybe (fromMaybe, catMaybes, isJust, isNothing)
 import Data.Proxy (Proxy(..))
 import Data.Either (isRight)
@@ -24,7 +24,7 @@ import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumen
 import Test.Hspec (Spec, hspec, describe, it)
 import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
 import Data.Map.Strict (Map, (!))
-import Test.Common (PGSql(..), arbitraryString, charOperator)
+import Test.Common (PGSql(..))
 import Test.Utils (propParsingWorks, propParsingFails, testParser, loadDirectory)
 
 import Test.PGString (TestPGQuotedString(..), TestPGString(..))
@@ -35,23 +35,15 @@ import qualified Test.PGIdentifier as PGIdentifier
 
 import qualified Test.PGComment as PGComment
 
-import Test.PGConstant (TestPGConstant(..))
 import qualified Test.PGConstant as PGConstant
 
 import Test.PGType (TestPGExactType(..), TestPGType(..))
 import qualified Test.PGType as PGType
 
+import Test.PGExpression (TestPGExpression(..))
+import qualified Test.PGExpression as PGExpression
 
-newtype TestPGOperator = TestPGOperator String deriving (Show)
 
-instance Arbitrary TestPGOperator where
-  arbitrary = TestPGOperator <$> arbitraryString charOperator `suchThat` (not . null)
-    `suchThat` (not . isInfixOf "--")
-    `suchThat` (not . isInfixOf "/*")
-    `suchThat` (\s -> (not . (`elem` ("+-"::String)) . last $ s)
-                   || (not . null . filter (`elem` ("~!@#%^&|`?"::String)) $ s))
-instance PGSql TestPGOperator where
-  render (TestPGOperator s) = s
 
 
 data TestPGResult
@@ -341,48 +333,6 @@ instance PGSql TPGFFailedIncoherentReturnTypes where
   render (TPGFFailedIncoherentReturnTypes x) = render x
 
 
-data TestPGTypeCast
-  = TPGTCPrefix       TestPGType                TestPGString
-  | TPGTCSuffix       TestPGType                TestPGExpression
-  | TPGTCAs           TestPGType                TestPGExpression
-  | TPGTCFunctionCall TestPGQualifiedIdentifier TestPGExpression
-  deriving (Show, Eq)
-
-instance Arbitrary TestPGTypeCast where
-  arbitrary = oneof [
-      TPGTCPrefix       <$> arbitrary <*> arbitrary
-    , TPGTCSuffix       <$> arbitrary <*> arbitrary
-    , TPGTCAs           <$> arbitrary <*> arbitrary
-    , TPGTCFunctionCall <$> arbitrary <*> arbitrary]
-
-instance PGSql TestPGTypeCast where
-  render (TPGTCPrefix       t v) = (render t) ++ " " ++ (render v)
-  render (TPGTCSuffix       t v) = (render v) ++ "::" ++ (render t)
-  render (TPGTCAs           t v) = "cast (" ++ (render v) ++ " as " ++ (render t) ++ ")"
-  render (TPGTCFunctionCall t v) = (render t) ++ "(" ++ (render v) ++ ")"
-
-
-data TestPGExpression
-  = TPGEConstant TestPGConstant
-  | TPGEIdentifier TestPGQualifiedIdentifier
-  | TPGEFunctionInvocation TestPGQualifiedIdentifier [TestPGExpression]
-  | TPGETypeCast TestPGTypeCast
-  deriving (Show, Eq)
-
-instance Arbitrary TestPGExpression where
-  arbitrary = sized $ \n -> oneof [
-      TPGEConstant <$> arbitrary
-    , TPGEIdentifier <$> arbitrary
-    , TPGEFunctionInvocation <$> arbitrary <*> (listOf $ resize (min 1 (n `div` 2)) arbitrary)
-    , TPGETypeCast <$> arbitrary]
-
-instance PGSql TestPGExpression where
-  render (TPGEConstant c) = render c
-  render (TPGEIdentifier n) = render n
-  render (TPGEFunctionInvocation n args) = (render n) ++ "(" ++ (intercalate "," . map render $ args) ++ ")"
-  render (TPGETypeCast e) = render e
-
-
 main :: IO ()
 main = do
   samples <- loadDirectory "tests/samples"
@@ -396,9 +346,7 @@ spec samples = do
   PGComment.spec
   PGConstant.spec
   PGType.spec
-
-  describe "pgOperator" $ do
-    propParsingWorks pgOperator (Proxy :: Proxy TestPGOperator)
+  PGExpression.spec
 
   describe "pgResult" $ do
     propParsingWorks pgResult (Proxy :: Proxy TestPGResult)
@@ -416,9 +364,6 @@ spec samples = do
 --    propParsingWorks pgFunction (Proxy :: Proxy TPGFCorrect)
 --    propParsingFails pgFunction "NoReturnTypeInfo" (Proxy :: Proxy TPGFFailedNoReturnTypeInfo)
 --    propParsingFails pgFunction "IncoherentReturnTypes" (Proxy :: Proxy TPGFFailedIncoherentReturnTypes)
-
-  describe "pgExpression" $ do
-    propParsingWorks pgExpression (Proxy :: Proxy TestPGExpression)
 
   describe "pgDeclarations" $ do
     let test t = testParser pgDeclarations t . Right
