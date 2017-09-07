@@ -17,10 +17,10 @@ import Data.List (intercalate, tails)
 import Data.Maybe (fromMaybe, catMaybes, isJust, isNothing)
 import Data.Proxy (Proxy(..))
 import Data.Either (isRight)
-import Control.Monad (liftM2)
+
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
-import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResultClass(..), PGResult(..), PGIdentifier(..), PGTypeClass(..))
+import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResult(..), PGIdentifier(..))
 import Test.Hspec (Spec, hspec, describe, it)
 import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
 import Data.Map.Strict (Map, (!))
@@ -43,34 +43,9 @@ import qualified Test.PGType as PGType
 import Test.PGExpression (TestPGExpression(..))
 import qualified Test.PGExpression as PGExpression
 
+import Test.PGResult (TestPGResult(..))
+import qualified Test.PGResult as PGResult
 
-
-
-data TestPGResult
-  = TestPGResultSingle [TestPGType]
-  | TestPGResultSetOf [TestPGType]
-  | TestPGResultTable [(TestPGIdentifier, TestPGType)]
-    deriving (Show, Eq)
-
-instance Arbitrary TestPGResult where
-  arbitrary = oneof [arbitraryResultSingle, arbitraryResultSetOf, arbitraryResultTable] where
-    arbitraryResultSingle = TestPGResultSingle . pure <$> (arbitrary `suchThat` (/= TestPGType "null"))
-    arbitraryResultSetOf = TestPGResultSetOf . pure <$> arbitrary
-    arbitraryResultTable = TestPGResultTable <$> listOf1 (liftM2 (,) arbitrary arbitrary)
-
-instance PGSql TestPGResult where
-  render (TestPGResultSingle s) = intercalate ", " . map render $ s
-  render (TestPGResultSetOf s) = ("setof " ++) . (intercalate ", ") . map render $ s
-  render (TestPGResultTable cs) =
-    ("table (" ++) . (++ ")") . intercalate "," . map (\(c, t) -> render c ++ " " ++ render t) $ cs
-
-instance PGResultClass TestPGResult TestPGType where
-  mergeResults (TestPGResultSingle ts) (TestPGResultSingle ts') = TestPGResultSingle <$> (mergeTypes ts ts')
-  mergeResults (TestPGResultSetOf  ts) (TestPGResultSetOf  ts') = TestPGResultSetOf  <$> (mergeTypes ts ts')
-  mergeResults (TestPGResultSetOf  ts) (TestPGResultSingle ts') = TestPGResultSetOf  <$> (mergeTypes ts ts')
-  mergeResults _                       _                        = Nothing
-
-  resultSingle = TestPGResultSingle
 
 
 instance Arbitrary PGArgumentMode where
@@ -347,9 +322,7 @@ spec samples = do
   PGConstant.spec
   PGType.spec
   PGExpression.spec
-
-  describe "pgResult" $ do
-    propParsingWorks pgResult (Proxy :: Proxy TestPGResult)
+  PGResult.spec
 
   describe "pgArgument" $ do
     propParsingWorks pgArgument (Proxy :: Proxy TestPGArgument)
