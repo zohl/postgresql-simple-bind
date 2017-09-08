@@ -12,142 +12,39 @@
 
 module Main where
 
-
-import Data.List (intercalate, tails)
-import Data.Maybe (fromMaybe, catMaybes, isJust, isNothing)
-import Data.Proxy (Proxy(..))
+import Data.List (intercalate)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Either (isRight)
-
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Bind.Parser
 import Database.PostgreSQL.Simple.Bind.Representation (PGFunction(..), PGArgumentClass(..), PGArgumentMode(..), PGResult(..), PGIdentifier(..))
 import Test.Hspec (Spec, hspec, describe, it)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, arbitrarySizedNatural, listOf, listOf1, elements, arbitraryBoundedEnum)
+import Test.QuickCheck (Gen, Arbitrary(..), resize, oneof, suchThat, arbitrarySizedNatural, listOf, listOf1, elements)
 import Data.Map.Strict (Map, (!))
 import Test.Common (PGSql(..))
-import Test.Utils (propParsingWorks, propParsingFails, testParser, loadDirectory)
+import Test.Utils (testParser, loadDirectory)
 
 import Test.PGString (TestPGQuotedString(..), TestPGString(..))
 import qualified Test.PGString as PGString
 
-import Test.PGIdentifier (TestPGNormalIdentifier(..), TestPGQualifiedIdentifier(..), TestPGIdentifier(..))
+import Test.PGIdentifier (TestPGNormalIdentifier(..), TestPGQualifiedIdentifier(..))
 import qualified Test.PGIdentifier as PGIdentifier
 
 import qualified Test.PGComment as PGComment
 
 import qualified Test.PGConstant as PGConstant
 
-import Test.PGType (TestPGExactType(..), TestPGType(..))
+import Test.PGType (TestPGExactType(..))
 import qualified Test.PGType as PGType
 
-import Test.PGExpression (TestPGExpression(..))
+
 import qualified Test.PGExpression as PGExpression
 
 import Test.PGResult (TestPGResult(..))
 import qualified Test.PGResult as PGResult
 
-
-
-instance Arbitrary PGArgumentMode where
-  arbitrary = arbitraryBoundedEnum
-
-data TestPGArgument = TestPGArgument {
-    tpgaMode            :: Maybe PGArgumentMode
-  , tpgaName            :: Maybe TestPGIdentifier
-  , tpgaType            :: TestPGType
-  , tpgaDefaultNotation :: String
-  , tpgaDefaultValue    :: Maybe TestPGExpression
-  } deriving (Show, Eq)
-
-instance Arbitrary TestPGArgument where
-  arbitrary = do
-    tpgaMode            <- arbitrary
-    tpgaName            <- arbitrary
-    tpgaType            <- arbitrary
-    tpgaDefaultNotation <- elements ["=", "default"]
-    tpgaDefaultValue    <- arbitrary
-    return TestPGArgument {..}
-
-instance PGSql TestPGArgument where
-  render (TestPGArgument {..}) = concat . catMaybes $ [
-      ((++ " ") . show) <$> tpgaMode
-    , (++ " ") . render <$> tpgaName
-    , Just . render $ tpgaType
-    , (' ':)  . (tpgaDefaultNotation ++) . (' ':) . render <$> tpgaDefaultValue]
-
-instance PGArgumentClass TestPGArgument TestPGType where
-  argumentMode     = fromMaybe In . tpgaMode
-  argumentOptional = maybe False (const True) . tpgaDefaultValue
-  argumentType     = tpgaType
-
-
-newtype TestPGArgumentList = TestPGArgumentList { getArguments :: [TestPGArgument] } deriving (Show)
-
-instance Arbitrary TestPGArgumentList where
-  arbitrary = TestPGArgumentList <$> (listOf arbitrary)
-  shrink (TestPGArgumentList xs) = map TestPGArgumentList (tail . tails $ xs)
-
-instance PGSql TestPGArgumentList where
-  render (TestPGArgumentList xs) = intercalate ", " . map render $ xs
-
-
-wrap :: ArgumentListChecker TestPGArgument -> TestPGArgumentList -> Bool
-wrap check (TestPGArgumentList xs) = either (const False) (const True) . check $ xs
-
-newtype TPGALCorrect = TPGALCorrect { getArgumentList :: TestPGArgumentList } deriving (Show)
-
-instance Arbitrary TPGALCorrect where
-  arbitrary = TPGALCorrect <$> arbitrary
-    `suchThat` (wrap checkExpectedDefaults)
-    `suchThat` (wrap checkNotExpectedDefaults)
-    `suchThat` (wrap checkVariadic)
-
-instance PGSql TPGALCorrect where
-  render (TPGALCorrect x) = render x
-
-
-newtype TPGALFailedCheckExpectedDefaults = TPGALFailedCheckExpectedDefaults TestPGArgumentList deriving (Show)
-
-instance Arbitrary TPGALFailedCheckExpectedDefaults where
-  arbitrary = TPGALFailedCheckExpectedDefaults <$> arbitraryArgumentList
-    `suchThat` (not . wrap checkExpectedDefaults)
-    `suchThat` (wrap checkNotExpectedDefaults)
-    `suchThat` (wrap checkVariadic)
-    where
-      arbitraryArgumentList = sized $ \n -> fmap (TestPGArgumentList . concat)
-                                          . sequence . map (resize $ max 1 (n `div` 3)) $ [
-          listOf  arbitrary
-        , listOf1 (arbitrary `suchThat` (isJust . tpgaDefaultValue)) `suchThat` (not . empty')
-        , listOf1 (arbitrary `suchThat` (isNothing . tpgaDefaultValue)) `suchThat` (not . empty')]
-
-      empty' = null . filter ((`elem` [In, InOut]) . fromMaybe In  . tpgaMode)
-
-instance PGSql TPGALFailedCheckExpectedDefaults where
-  render (TPGALFailedCheckExpectedDefaults x) = render x
-
-
-newtype TPGALFailedCheckNotExpectedDefaults = TPGALFailedCheckNotExpectedDefaults TestPGArgumentList deriving (Show)
-
-instance Arbitrary TPGALFailedCheckNotExpectedDefaults where
-  arbitrary = TPGALFailedCheckNotExpectedDefaults <$> arbitrary
-    `suchThat` (wrap checkExpectedDefaults)
-    `suchThat` (not . wrap checkNotExpectedDefaults)
-    `suchThat` (wrap checkVariadic)
-
-instance PGSql TPGALFailedCheckNotExpectedDefaults where
-  render (TPGALFailedCheckNotExpectedDefaults x) = render x
-
-
-newtype TPGALFailedCheckVariadic = TPGALFailedCheckVariadic TestPGArgumentList deriving (Show)
-
-instance Arbitrary TPGALFailedCheckVariadic where
-  arbitrary = TPGALFailedCheckVariadic <$> arbitrary
-    `suchThat` (wrap checkExpectedDefaults)
-    `suchThat` (wrap checkNotExpectedDefaults)
-    `suchThat` (not . wrap checkVariadic)
-
-instance PGSql TPGALFailedCheckVariadic where
-  render (TPGALFailedCheckVariadic x) = render x
+import Test.PGArgument (TestPGArgumentList(..), TPGALCorrect(..))
+import qualified Test.PGArgument as PGArgument
 
 
 data TestPGFunction = TestPGFunction {
@@ -323,15 +220,7 @@ spec samples = do
   PGType.spec
   PGExpression.spec
   PGResult.spec
-
-  describe "pgArgument" $ do
-    propParsingWorks pgArgument (Proxy :: Proxy TestPGArgument)
-
-  describe "pgArgumentList" $ do
-    propParsingWorks (pgArgumentList True) (Proxy :: Proxy TPGALCorrect)
-    propParsingFails (pgArgumentList True) "DefaultValueExpected" (Proxy :: Proxy TPGALFailedCheckExpectedDefaults)
-    propParsingFails (pgArgumentList True) "DefaultValueNotExpected" (Proxy :: Proxy TPGALFailedCheckNotExpectedDefaults)
-    propParsingFails (pgArgumentList True) "NonOutVariableAfterVariadic" (Proxy :: Proxy TPGALFailedCheckVariadic)
+  PGArgument.spec
 
 --  describe "pgFunction" $ do
 --    propParsingWorks pgFunction (Proxy :: Proxy TPGFCorrect)
