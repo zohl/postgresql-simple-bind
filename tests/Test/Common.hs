@@ -10,13 +10,14 @@ module Test.Common (
   , proxyMap
 
   , arbitraryString
-  , arbitraryString'
 
+  , CharClass(..)
   , inClass
   , charASCII
+  , charASCIInl
   , charOperator
-  , charId'
-  , charTag'
+  , charId
+  , charTag
 
   , arbitrarySumDecomposition
   ) where
@@ -24,7 +25,7 @@ module Test.Common (
 import Data.Char (chr)
 import Data.Proxy (Proxy(..))
 import Control.Monad (liftM2)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, choose)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, oneof, choose)
 import GHC.TypeLits (Symbol)
 
 
@@ -39,14 +40,24 @@ proxyMap :: Proxy (f :: Symbol -> *) -> Proxy a -> Proxy (f a)
 proxyMap _ _ = Proxy
 
 
-arbitraryString :: Gen Char -> Gen String
-arbitraryString c = sized $ \n -> sequence . replicate n $ c
+data CharClass
+  = Uniform        String
+  | RestrictedHead String String
 
-arbitraryString' :: (Gen Char, Gen Char) -> Gen String
-arbitraryString' (c, c') = sized $ \case
+ccHead :: CharClass -> Gen Char
+ccHead (Uniform s)          = inClass s
+ccHead (RestrictedHead s _) = inClass s
+
+ccTail :: CharClass -> Gen Char
+ccTail (Uniform s)           = inClass s
+ccTail (RestrictedHead s s') = inClass (s ++ s')
+
+
+arbitraryString :: CharClass -> Gen String
+arbitraryString c = sized $ \case
   0 -> return []
-  1 -> pure <$> c
-  n -> liftM2 (:) c (resize (n-1) $ arbitraryString c')
+  1 -> pure <$> (ccHead c)
+  n -> liftM2 (:) (ccHead c) (sequence . replicate (n-1) $ ccTail c)
 
 
 inClass :: String -> Gen Char
@@ -55,17 +66,21 @@ inClass = oneof . inClass' where
   inClass' (x:xs)       = (return x):(inClass' xs)
   inClass' []           = []
 
-charASCII :: Gen Char
-charASCII = inClass [chr 32, '-', chr 127]
 
-charOperator :: Gen Char
-charOperator = inClass "+*/<>=~!@#%^&|`?-"
+charASCII :: CharClass
+charASCII = Uniform [chr 32, '-', chr 127]
 
-charId' :: (Gen Char, Gen Char)
-charId' = (inClass "A-Za-z_", inClass "A-Za-z0-9_$")
+charASCIInl :: CharClass
+charASCIInl = Uniform [chr 32, '-', chr 127, '\n']
 
-charTag' :: (Gen Char, Gen Char)
-charTag' = (inClass "A-Za-z_", inClass "A-Za-z0-9_")
+charTag :: CharClass
+charTag = RestrictedHead "A-Za-z_" "0-9"
+
+charId :: CharClass
+charId = RestrictedHead "A-Za-z_" "0-9$"
+
+charOperator :: CharClass
+charOperator = Uniform "+*/<>=~!@#%^&|`?-"
 
 
 arbitrarySumDecomposition :: Int -> Gen [Int]

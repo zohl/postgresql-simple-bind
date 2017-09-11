@@ -25,7 +25,7 @@ import Database.PostgreSQL.Simple.Bind.Representation (PGIdentifier(..))
 import Test.Hspec (Spec, describe, shouldSatisfy, shouldBe)
 import Test.QuickCheck (Gen, Arbitrary(..), oneof, suchThat)
 import qualified Data.Text as T
-import Test.Common (PGSql(..), arbitraryString', charId')
+import Test.Common (PGSql(..), arbitraryString, charId)
 import Test.Utils (propParserRight, propParsingWorks)
 import Test.PGString (TestPGQuotedString(..))
 
@@ -33,7 +33,7 @@ import Test.PGString (TestPGQuotedString(..))
 newtype TestPGNormalIdentifier = TestPGNormalIdentifier String deriving (Show)
 
 instance Arbitrary TestPGNormalIdentifier where
-  arbitrary = TestPGNormalIdentifier <$> (arbitraryString' charId') `suchThat` (not . null)
+  arbitrary = TestPGNormalIdentifier <$> (arbitraryString charId) `suchThat` (not . null)
 
 instance PGSql TestPGNormalIdentifier where
   render (TestPGNormalIdentifier s) = s

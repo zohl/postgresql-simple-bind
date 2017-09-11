@@ -22,7 +22,7 @@ import Test.Hspec (Spec, shouldSatisfy, describe)
 import Test.QuickCheck (Gen, Arbitrary(..), oneof, suchThat)
 import qualified Data.Text as T
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, SomeSymbol(..), someSymbolVal)
-import Test.Common (PGSql(..), proxyArbitrary, proxyMap, arbitraryString, arbitraryString', charASCII, charTag')
+import Test.Common (PGSql(..), proxyArbitrary, proxyMap, arbitraryString, charASCII, charTag)
 import Test.Utils (propParserRight, propParsingWorks)
 
 
@@ -30,7 +30,7 @@ import Test.Utils (propParserRight, propParsingWorks)
 newtype TestPGTag = TestPGTag String deriving (Show)
 
 instance Arbitrary TestPGTag where
-  arbitrary = TestPGTag <$> oneof [arbitraryString' charTag', return ""] where
+  arbitrary = TestPGTag <$> oneof [arbitraryString charTag, return ""] where
 
 instance PGSql TestPGTag where
   render (TestPGTag s) = s

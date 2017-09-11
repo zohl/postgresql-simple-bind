@@ -25,9 +25,9 @@ import Data.Proxy (Proxy(..))
 import Data.Tagged (tagWith)
 import Database.PostgreSQL.Simple.Bind.Parser
 import Test.Hspec (Spec, describe, shouldSatisfy)
-import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat, frequency)
+import Test.QuickCheck (Gen, Arbitrary(..), sized, resize, oneof, suchThat)
 import qualified Data.Text as T
-import Test.Common (PGSql(..), arbitraryString, charASCII, arbitrarySumDecomposition)
+import Test.Common (PGSql(..), arbitraryString, charASCII, charASCIInl, arbitrarySumDecomposition)
 import Test.Utils (propParserRight, propParsingWorks)
 
 
@@ -50,7 +50,7 @@ instance Arbitrary TestPGBlockComment where
     >>= mapM mkElement . zip (map ((== 0) . (`mod` 2)) [(1::Int)..])) where
       mkElement (isGroup, s) = resize s $ if isGroup
         then (arbitrary :: Gen TestPGBlockComment)
-        else (TestPGBlockCommentElement <$> (arbitraryString $ frequency [(15, charASCII), (1, return '\n')])
+        else (TestPGBlockCommentElement <$> (arbitraryString charASCIInl)
                     `suchThat` (not . isInfixOf "/*")
                     `suchThat` (not . isInfixOf "*/")
                     `suchThat` (not . isSuffixOf "/")
